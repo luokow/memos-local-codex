@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -52,10 +53,31 @@ public sealed class ModelServiceStartLock : IAsyncDisposable
         if (!AllowedClients.Contains(ownerClient)) throw new ArgumentException("未知的模型启动锁客户端", nameof(ownerClient));
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("模型启动锁路径不能为空", nameof(path));
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? throw new InvalidOperationException("模型启动锁路径缺少目录"));
+        var recoveryPath = $"{path}.recovery";
         var deadline = DateTimeOffset.UtcNow + timeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (File.Exists(recoveryPath))
+            {
+                if (await serviceHealthy(cancellationToken)) return null;
+                var observedRecovery = await TryReadAsync(recoveryPath, cancellationToken);
+                if (observedRecovery is not null && !IsProcessAlive(observedRecovery.Value.Document.OwnerPid))
+                {
+                    var retiredDigest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(observedRecovery.Value.Raw))).ToLowerInvariant();
+                    var retiredPath = $"{recoveryPath}.retired.{retiredDigest}";
+                    try
+                    {
+                        File.Move(recoveryPath, retiredPath);
+                        continue;
+                    }
+                    catch (IOException)
+                    {
+                    }
+                }
+                await Task.Delay(250, cancellationToken);
+                continue;
+            }
             var document = new ModelStartLockDocument
             {
                 OwnerPid = Environment.ProcessId,
@@ -78,12 +100,41 @@ public sealed class ModelServiceStartLock : IAsyncDisposable
                 var observed = await TryReadAsync(path, cancellationToken);
                 if (observed is not null && !IsProcessAlive(observed.Value.Document.OwnerPid))
                 {
-                    var current = await TryReadAsync(path, cancellationToken);
-                    if (current is not null && string.Equals(observed.Value.Raw, current.Value.Raw, StringComparison.Ordinal))
+                    var recoveryContent = JsonSerializer.Serialize(new ModelStartLockDocument
                     {
-                        try { File.Delete(path); } catch (IOException) { }
+                        OwnerPid = Environment.ProcessId,
+                        OwnerClient = ownerClient,
+                        AcquiredAt = DateTimeOffset.UtcNow,
+                        ConfigSha256 = configSha256,
+                    });
+                    try
+                    {
+                        var recoveryBytes = Encoding.UTF8.GetBytes(recoveryContent);
+                        using var recoveryStream = new FileStream(recoveryPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                        recoveryStream.Write(recoveryBytes);
+                        recoveryStream.Flush(flushToDisk: true);
+                    }
+                    catch (IOException) when (File.Exists(recoveryPath))
+                    {
+                        await Task.Delay(250, cancellationToken);
                         continue;
                     }
+
+                    try
+                    {
+                        var current = await TryReadAsync(path, cancellationToken);
+                        if (current is not null
+                            && string.Equals(observed.Value.Raw, current.Value.Raw, StringComparison.Ordinal)
+                            && !IsProcessAlive(current.Value.Document.OwnerPid))
+                        {
+                            File.Delete(path);
+                        }
+                    }
+                    finally
+                    {
+                        await DeleteIfOwnedAsync(recoveryPath, recoveryContent, cancellationToken);
+                    }
+                    continue;
                 }
                 await Task.Delay(250, cancellationToken);
             }
@@ -116,6 +167,19 @@ public sealed class ModelServiceStartLock : IAsyncDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {
             return null;
+        }
+    }
+
+    private static async Task DeleteIfOwnedAsync(string path, string ownedContent, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            var current = await File.ReadAllTextAsync(path, cancellationToken);
+            if (string.Equals(current, ownedContent, StringComparison.Ordinal)) File.Delete(path);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

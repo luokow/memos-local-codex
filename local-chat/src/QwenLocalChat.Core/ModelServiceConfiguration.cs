@@ -189,6 +189,15 @@ public sealed class ModelServiceConfigStore(string projectRoot, string configPat
                 .Where(name => !AllowedFields.Contains(name))
                 .ToArray();
             if (unknown.Length > 0) throw new JsonException($"共享模型服务配置包含未知字段：{string.Join(", ", unknown)}");
+            var present = document.RootElement.EnumerateObject()
+                .Select(property => property.Name)
+                .ToHashSet(StringComparer.Ordinal);
+            var missing = AllowedFields
+                .Where(name => !present.Contains(name))
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+            if (missing.Length > 0)
+                throw new JsonException($"共享模型服务配置缺少必填字段：{string.Join(", ", missing)}");
             var config = JsonSerializer.Deserialize<ModelServiceConfig>(text, JsonOptions)
                 ?? throw new JsonException("共享模型服务配置内容为空");
             ThrowIfInvalid(config);

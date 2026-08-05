@@ -47,6 +47,7 @@ public sealed class QwenServiceManager(
     private readonly HttpClient _http = httpClient ?? new HttpClient(new SocketsHttpHandler { UseProxy = false });
     private readonly SemaphoreSlim _startGate = new(1, 1);
     private IOwnedModelProcess? _ownedProcess;
+    private bool _lastIdentityPartial;
 
     public bool OwnsModel => _ownedProcess is { HasExited: false };
     public int? OwnedProcessId => OwnsModel ? _ownedProcess!.Id : null;
@@ -81,7 +82,7 @@ public sealed class QwenServiceManager(
             if (await IsHealthyTargetAsync(cancellationToken))
             {
                 await RefreshEffectiveContextSizeAsync(cancellationToken);
-                await ModelServiceLifecycleLog.AppendAsync(options, "reuse", "qwen_local_start", "success", OwnedProcessId, cancellationToken: cancellationToken);
+                await ModelServiceLifecycleLog.AppendAsync(options, "reuse", "qwen_local_start", IdentityAuditResult(), OwnedProcessId, cancellationToken: cancellationToken);
                 return new ModelAvailability(_ownedProcess is null, OwnedProcessId);
             }
 
@@ -106,7 +107,7 @@ public sealed class QwenServiceManager(
                 if (crossProcessLock is null)
                 {
                     await RefreshEffectiveContextSizeAsync(cancellationToken);
-                    await ModelServiceLifecycleLog.AppendAsync(options, "reuse", "qwen_local_start", "success", cancellationToken: cancellationToken);
+                    await ModelServiceLifecycleLog.AppendAsync(options, "reuse", "qwen_local_start", IdentityAuditResult(), cancellationToken: cancellationToken);
                     return new ModelAvailability(true, null);
                 }
             }
@@ -116,7 +117,7 @@ public sealed class QwenServiceManager(
                 if (await IsHealthyTargetAsync(cancellationToken))
                 {
                     await RefreshEffectiveContextSizeAsync(cancellationToken);
-                    await ModelServiceLifecycleLog.AppendAsync(options, "reuse", "qwen_local_start", "success", cancellationToken: cancellationToken);
+                    await ModelServiceLifecycleLog.AppendAsync(options, "reuse", "qwen_local_start", IdentityAuditResult(), cancellationToken: cancellationToken);
                     return new ModelAvailability(true, null);
                 }
                 if (_ownedProcess is null && await IsPortOccupiedAsync(cancellationToken))
@@ -132,7 +133,7 @@ public sealed class QwenServiceManager(
                     if (await IsHealthyTargetAsync(cancellationToken))
                     {
                         await RefreshEffectiveContextSizeAsync(cancellationToken);
-                        await ModelServiceLifecycleLog.AppendAsync(options, "start", "qwen_local_start", "success", _ownedProcess.Id, cancellationToken: cancellationToken);
+                        await ModelServiceLifecycleLog.AppendAsync(options, "start", "qwen_local_start", IdentityAuditResult(), _ownedProcess.Id, cancellationToken: cancellationToken);
                         return new ModelAvailability(false, _ownedProcess.Id);
                     }
                     await Task.Delay(250, cancellationToken);
@@ -256,11 +257,16 @@ public sealed class QwenServiceManager(
 
     private async Task<bool> IsHealthyTargetAsync(CancellationToken cancellationToken)
     {
+        _lastIdentityPartial = false;
         if (!await IsHealthyAsync(cancellationToken)) return false;
         if (!options.VerifyServiceIdentity) return true;
 
         var pid = await TryFindListeningPidAsync(options.Port, cancellationToken);
-        if (pid is null) return true; // health is real, but listener identity is partial
+        if (pid is null)
+        {
+            _lastIdentityPartial = true;
+            return true; // health is real, but listener identity is partial
+        }
         string? actualPath = null;
         try
         {
@@ -269,9 +275,14 @@ public sealed class QwenServiceManager(
         }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
+            _lastIdentityPartial = true;
             return true; // access denied or race: reportable partial, never a reason to kill
         }
-        if (string.IsNullOrWhiteSpace(actualPath)) return true;
+        if (string.IsNullOrWhiteSpace(actualPath))
+        {
+            _lastIdentityPartial = true;
+            return true;
+        }
         if (!string.Equals(Path.GetFullPath(actualPath), Path.GetFullPath(options.ServerExecutable), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"端口 {options.BindHost}:{options.Port} 的健康服务进程路径与共享配置不一致，拒绝复用");
 
@@ -280,24 +291,40 @@ public sealed class QwenServiceManager(
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(2));
             using var response = await _http.GetAsync(new Uri(options.HealthUri, "/v1/models"), timeout.Token);
-            if (!response.IsSuccessStatusCode) return true;
+            if (!response.IsSuccessStatusCode)
+            {
+                _lastIdentityPartial = true;
+                return true;
+            }
             await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
-            if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return true;
+            if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+            {
+                _lastIdentityPartial = true;
+                return true;
+            }
             var aliases = data.EnumerateArray()
                 .Where(item => item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
                 .Select(item => item.GetProperty("id").GetString())
                 .Where(alias => !string.IsNullOrWhiteSpace(alias))
                 .ToArray();
+            if (aliases.Length == 0)
+            {
+                _lastIdentityPartial = true;
+                return true;
+            }
             if (aliases.Length > 0 && !aliases.Contains(options.ModelAlias, StringComparer.Ordinal))
                 throw new InvalidOperationException($"端口 {options.BindHost}:{options.Port} 的模型别名与共享配置不一致，拒绝复用");
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or JsonException or IOException)
         {
+            _lastIdentityPartial = true;
             return true; // alias unavailable is partial after executable path matched
         }
         return true;
     }
+
+    private string IdentityAuditResult() => _lastIdentityPartial ? "partial" : "success";
 
     /// <summary>Best-effort PID lookup for a TCP listener on 127.0.0.1:port via netstat.</summary>
     internal static async Task<int?> TryFindListeningPidAsync(int port, CancellationToken cancellationToken = default)

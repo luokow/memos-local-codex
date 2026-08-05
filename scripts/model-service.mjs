@@ -111,6 +111,40 @@ async function readLock(lockPath) {
   } catch { return null; }
 }
 
+export async function retireRecoveryGuard(recoveryPath, observedRecovery) {
+  const retiredDigest = crypto.createHash("sha256").update(observedRecovery.raw, "utf8").digest("hex");
+  const retiredPath = `${recoveryPath}.retired.${retiredDigest}`;
+  let linked = false;
+  try {
+    await fsp.link(recoveryPath, retiredPath);
+    linked = true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    if (error?.code !== "EEXIST") throw error;
+  }
+
+  let sourceStat;
+  let retiredStat;
+  let retiredRaw;
+  try {
+    [sourceStat, retiredStat, retiredRaw] = await Promise.all([
+      fsp.stat(recoveryPath, { bigint: true }),
+      fsp.stat(retiredPath, { bigint: true }),
+      fsp.readFile(retiredPath, "utf8"),
+    ]);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  const sameFile = sourceStat.dev === retiredStat.dev && sourceStat.ino === retiredStat.ino;
+  if (!sameFile || retiredRaw !== observedRecovery.raw) {
+    if (linked && sameFile) await fsp.unlink(retiredPath).catch(() => {});
+    return false;
+  }
+  await fsp.unlink(recoveryPath);
+  return true;
+}
+
 export async function acquireStartLock({
   lockPath,
   ownerClient,
@@ -122,8 +156,19 @@ export async function acquireStartLock({
 }) {
   if (!new Set(["qwen-local", "memos-codex"]).has(ownerClient)) throw new ModelServiceError("invalid_lock_client", "unknown model-service lock client");
   await fsp.mkdir(path.dirname(lockPath), { recursive: true });
+  const recoveryPath = `${lockPath}.recovery`;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    const recoveryInProgress = await fsp.access(recoveryPath).then(() => true, () => false);
+    if (recoveryInProgress) {
+      if (await serviceHealthy()) return null;
+      const observedRecovery = await readLock(recoveryPath);
+      if (observedRecovery && !pidAlive(observedRecovery.document.owner_pid)) {
+        if (await retireRecoveryGuard(recoveryPath, observedRecovery)) continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      continue;
+    }
     const content = JSON.stringify({
       schema_version: 1,
       owner_pid: process.pid,
@@ -148,12 +193,36 @@ export async function acquireStartLock({
       if (await serviceHealthy()) return null;
       const observed = await readLock(lockPath);
       if (observed && !pidAlive(observed.document.owner_pid)) {
-        const current = await readLock(lockPath);
-        if (current?.raw === observed.raw) {
-          await fsp.unlink(lockPath).catch(() => {});
-          await onRecover(observed.document);
+        const recoveryContent = JSON.stringify({
+          schema_version: 1,
+          owner_pid: process.pid,
+          owner_client: ownerClient,
+          acquired_at: new Date().toISOString(),
+          config_sha256: configSha256,
+        });
+        let recoveryHandle;
+        try {
+          recoveryHandle = await fsp.open(recoveryPath, "wx");
+          await recoveryHandle.writeFile(recoveryContent, "utf8");
+          await recoveryHandle.sync();
+        } catch (recoveryError) {
+          await recoveryHandle?.close().catch(() => {});
+          if (recoveryError?.code !== "EEXIST") throw recoveryError;
+          await new Promise((resolve) => setTimeout(resolve, pollMs));
           continue;
         }
+        try {
+          const current = await readLock(lockPath);
+          if (current?.raw === observed.raw && !pidAlive(current.document.owner_pid)) {
+            await fsp.unlink(lockPath);
+            await onRecover(observed.document);
+          }
+        } finally {
+          await recoveryHandle.close().catch(() => {});
+          const currentRecovery = await fsp.readFile(recoveryPath, "utf8").catch(() => null);
+          if (currentRecovery === recoveryContent) await fsp.unlink(recoveryPath).catch(() => {});
+        }
+        continue;
       }
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
@@ -294,6 +363,7 @@ export async function ensureModelService({ root, reason, ownerClient = "memos-co
   try {
     loaded = await loadConfig();
     state = await probe(loaded.config);
+    if (state.identity === "mismatch") throw new ModelServiceError(state.errorCode ?? "service_identity_mismatch", "healthy local model service identity does not match shared config after lock acquisition");
     if (state.healthy) return { reused: true, pid: state.pid, identity: state.identity, config: loaded.config, configSha256: loaded.configSha256 };
     if (!loaded.config.auto_start_on_demand) throw new ModelServiceError("auto_start_disabled", "shared config disables on-demand model startup");
     if (state.portOccupied) throw new ModelServiceError("port_occupied", `port ${loaded.config.port} became occupied before model startup`);

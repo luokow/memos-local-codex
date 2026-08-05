@@ -23,6 +23,8 @@ MemOS 文件日志和专用 LLM 日志均已禁用；遥测与 MemOS Hub 已禁�
 
 Qwen Local 和 MemOS 读取同一份 `runtime/model-service.json`。两端启动前会重新读取配置，并通过 `runtime/locks/model-service-start.lock` 协调，避免并发启动多个模型进程。锁文件包含 PID、客户端身份和配置摘要；只有死 PID 且服务不健康时才会恢复残留锁。
 
+死锁回收使用同目录的 `.recovery` 原子守卫。守卫存在时，两端都会等待或复用已经健康的服务；死 PID 留下的守卫会按原始内容哈希生成 `.retired.<sha256>` 审计文件。Node 使用同卷硬链接和文件 ID 比较，C# 使用禁止覆盖的原子移动，随后再继续获取启动锁。`npm run accept:lock-cross-language` 会让 C# 与 Node 同时回收同一组遗留主锁和守卫，并验证只有一个启动所有者。
+
 `auto_start_on_demand` 控制 MemOS 的真实 `recall` / `remember` 调用能否在冷状态启动模型。`memos_health` 和 `memos_list_recent` 保持只读，不会启动模型。Qwen Local 设置页的“记忆调用按需启动模型”开关会更新该字段。
 
 模型启动、复用、停止和失败事件记录在 `runtime/logs/model-service-lifecycle.jsonl`。日志保存路径哈希和配置摘要，不记录提示词或记忆正文。
@@ -49,6 +51,7 @@ Qwen Local 和 MemOS 读取同一份 `runtime/model-service.json`。两端启动
 cd 'D:\codex\experiments\memos-local-codex'
 npm run audit:prod
 npm test
+npm run accept:lock-cross-language
 npm run accept:lifecycle:read-only
 ```
 

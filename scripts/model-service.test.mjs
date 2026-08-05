@@ -11,6 +11,7 @@ import {
   canonicalizeConfig,
   ensureModelService,
   loadModelServiceConfig,
+  retireRecoveryGuard,
 } from "./model-service.mjs";
 
 const fixture = {
@@ -90,6 +91,62 @@ test("atomic lock recovers a dead owner but preserves a live owner", async () =>
   }
 });
 
+test("recovery guard prevents another client from deleting a stale start lock", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "memos-model-recovery-guard-"));
+  const lockPath = path.join(root, "model-service-start.lock");
+  const recoveryPath = `${lockPath}.recovery`;
+  try {
+    await fs.writeFile(lockPath, JSON.stringify({ schema_version: 1, owner_pid: 2147483647, owner_client: "qwen-local", acquired_at: "2026-08-05T00:00:00Z", config_sha256: "old" }));
+    await fs.writeFile(recoveryPath, JSON.stringify({ schema_version: 1, owner_pid: process.pid, owner_client: "qwen-local", acquired_at: "2026-08-05T00:00:00Z", config_sha256: "recovery" }));
+
+    await assert.rejects(
+      acquireStartLock({ lockPath, ownerClient: "memos-codex", configSha256: "new", timeoutMs: 80, pollMs: 20, serviceHealthy: async () => false }),
+      (error) => error?.code === "start_lock_timeout",
+    );
+    assert.equal(await fs.stat(lockPath).then(() => true, () => false), true);
+    assert.equal(await fs.stat(recoveryPath).then(() => true, () => false), true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("stale recovery guard is atomically retired before lock acquisition", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "memos-model-stale-recovery-"));
+  const lockPath = path.join(root, "model-service-start.lock");
+  const recoveryPath = `${lockPath}.recovery`;
+  try {
+    await fs.writeFile(recoveryPath, JSON.stringify({ schema_version: 1, owner_pid: 2147483647, owner_client: "qwen-local", acquired_at: "2026-08-05T00:00:00Z", config_sha256: "stale-recovery" }));
+    const lease = await acquireStartLock({ lockPath, ownerClient: "memos-codex", configSha256: "new", timeoutMs: 1000, pollMs: 20, serviceHealthy: async () => false });
+    assert.ok(lease);
+    await lease.release();
+    assert.equal(await fs.stat(recoveryPath).then(() => true, () => false), false);
+    assert.equal((await fs.readdir(root)).filter((name) => name.startsWith("model-service-start.lock.recovery.retired.")).length, 1);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("late recovery observer preserves a newly created guard", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "memos-model-late-recovery-"));
+  const recoveryPath = path.join(root, "model-service-start.lock.recovery");
+  const oldRaw = JSON.stringify({ schema_version: 1, owner_pid: 2147483647, owner_client: "qwen-local", acquired_at: "2026-08-05T00:00:00Z", config_sha256: "old" });
+  const newRaw = JSON.stringify({ schema_version: 1, owner_pid: process.pid, owner_client: "memos-codex", acquired_at: "2026-08-05T00:00:01Z", config_sha256: "new" });
+  try {
+    const digest = (await import("node:crypto")).default.createHash("sha256").update(oldRaw, "utf8").digest("hex");
+    const retiredPath = `${recoveryPath}.retired.${digest}`;
+    await fs.writeFile(retiredPath, oldRaw);
+    await fs.writeFile(recoveryPath, newRaw);
+
+    const retired = await retireRecoveryGuard(recoveryPath, { raw: oldRaw });
+
+    assert.equal(retired, false);
+    assert.equal(await fs.readFile(recoveryPath, "utf8"), newRaw);
+    assert.equal(await fs.readFile(retiredPath, "utf8"), oldRaw);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("on-demand policy refuses a cold start without spawning", async () => {
   let starts = 0;
   await assert.rejects(
@@ -105,6 +162,32 @@ test("on-demand policy refuses a cold start without spawning", async () => {
     (error) => error?.code === "auto_start_disabled",
   );
   assert.equal(starts, 0);
+});
+
+test("post-lock identity mismatch is rejected without spawning", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "memos-model-post-lock-identity-"));
+  let probes = 0;
+  let starts = 0;
+  try {
+    await assert.rejects(
+      ensureModelService({
+        root,
+        reason: "foreground_recall",
+        dependencies: {
+          loadConfig: async () => ({ config: fixture, configSha256: "fixture" }),
+          probe: async () => (++probes === 1
+            ? { healthy: false, identity: "unhealthy", portOccupied: false }
+            : { healthy: true, identity: "mismatch", pid: 4242, errorCode: "model_alias_mismatch" }),
+          spawnModel: async () => { starts += 1; },
+          appendEvent: async () => {},
+        },
+      }),
+      (error) => error?.code === "model_alias_mismatch",
+    );
+    assert.equal(starts, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test("lifecycle log stores path digests rather than paths or content", async () => {

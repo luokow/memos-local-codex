@@ -10,6 +10,7 @@
     "accept:lifecycle:read-only": "node scripts/lifecycle-acceptance.mjs read-only",
     "accept:lifecycle:recall": "node scripts/lifecycle-acceptance.mjs recall",
     "accept:lifecycle:remember": "node scripts/lifecycle-acceptance.mjs remember-isolated",
+    "accept:lock-cross-language": "node scripts/cross-language-lock-acceptance.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "verify:embedding": "node scripts/verify-offline-embedding.mjs"
   },

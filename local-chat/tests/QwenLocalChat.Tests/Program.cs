@@ -1,17 +1,56 @@
 using QwenLocalChat.Core;
 
+if (args.Length == 5 && args[0] == "--model-lock-helper")
+{
+    var lockPath = args[1];
+    var markerPath = args[2];
+    var startAt = DateTimeOffset.FromUnixTimeMilliseconds(long.Parse(args[3]));
+    var holdMilliseconds = int.Parse(args[4]);
+    var delay = startAt - DateTimeOffset.UtcNow;
+    if (delay > TimeSpan.Zero) await Task.Delay(delay);
+    await using var lease = await ModelServiceStartLock.AcquireAsync(
+        lockPath,
+        "qwen-local",
+        "cross-language-fixture",
+        TimeSpan.FromSeconds(10),
+        _ => Task.FromResult(File.Exists(markerPath)));
+    if (lease is null)
+    {
+        Console.WriteLine("REUSED");
+        return 0;
+    }
+    try
+    {
+        using var marker = new FileStream(markerPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        marker.WriteByte(1);
+        marker.Flush(flushToDisk: true);
+    }
+    catch (IOException)
+    {
+        Console.Error.WriteLine("DOUBLE_OWNER");
+        return 2;
+    }
+    Console.WriteLine("OWNER");
+    await Task.Delay(holdMilliseconds);
+    return 0;
+}
+
 var selected = args.Length == 0 ? null : args[0];
 var tests = new (string Name, Action Body)[]
 {
     ("settings-roundtrip", SettingsRoundTrip),
     ("settings-defaults-and-legacy-migration", SettingsDefaultsAndLegacyMigration),
     ("model-service-config-roundtrip-and-canonicalization", ModelServiceConfigRoundTripAndCanonicalization),
+    ("model-service-config-requires-boolean-fields", ModelServiceConfigRequiresBooleanFields),
     ("model-service-config-rejects-non-loopback", ModelServiceConfigRejectsNonLoopback),
     ("model-service-config-migrates-legacy-settings", ModelServiceConfigMigratesLegacySettings),
     ("model-start-lock-recovers-dead-owner", ModelStartLockRecoversDeadOwner),
     ("model-start-lock-preserves-live-owner", ModelStartLockPreservesLiveOwner),
+    ("model-start-lock-honors-recovery-guard", ModelStartLockHonorsRecoveryGuard),
+    ("model-start-lock-retires-stale-recovery-guard", ModelStartLockRetiresStaleRecoveryGuard),
     ("model-lifecycle-log-redacts-paths-and-content", ModelLifecycleLogRedactsPathsAndContent),
     ("owned-model-stop-records-lifecycle", OwnedModelStopRecordsLifecycle),
+    ("model-restart-transaction-restores-previous-runtime", ModelRestartTransactionRestoresPreviousRuntime),
     ("settings-number-input-prefers-visible-uncommitted-text", SettingsNumberInputPrefersVisibleUncommittedText),
     ("generation-options-from-settings-carry-anti-repetition", GenerationOptionsFromSettingsCarryAntiRepetition),
     ("context-keeps-latest-20-rounds", ContextKeepsLatest20Rounds),
@@ -31,6 +70,7 @@ var tests = new (string Name, Action Body)[]
     ("memory-is-injected-as-untrusted-one-shot-context", MemoryIsInjectedAsUntrustedOneShotContext),
     ("log-respects-runtime-toggle-boundaries", LogRespectsRuntimeToggleBoundaries),
     ("healthy-model-is-reused", HealthyModelIsReused),
+    ("partial-model-reuse-is-audited", PartialModelReuseIsAudited),
     ("cold-start-waits-for-health-and-records-ownership", ColdStartWaitsForHealthAndRecordsOwnership),
     ("model-launch-command-uses-runtime-settings", ModelLaunchCommandUsesRuntimeSettings),
     ("chat-client-sends-context-and-reads-visible-answer", ChatClientSendsContextAndReadsVisibleAnswer),
@@ -459,6 +499,38 @@ static void HealthyModelIsReused()
 
     Equal(true, availability.Reused, "a healthy local service must be reused");
     Equal(0, launcher.StartCount, "reuse must not launch another model process");
+}
+
+static void PartialModelReuseIsAudited()
+{
+    var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-partial-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    try
+    {
+        var port = FindUnusedPort();
+        var health = new ToggleHealthHandler { Healthy = true };
+        var options = new LocalModelOptions(
+            new Uri($"http://127.0.0.1:{port}/health"),
+            new Uri($"http://127.0.0.1:{port}/v1/chat/completions"),
+            System.IO.Path.Combine(directory, "server.exe"),
+            System.IO.Path.Combine(directory, "model.gguf"),
+            System.IO.Path.Combine(directory, "server.log"),
+            port, "fixture", 4096, 0, false, false, 1, 30,
+            LifecycleLogFile: System.IO.Path.Combine(directory, "lifecycle.jsonl"),
+            ConfigSha256: "fixture",
+            VerifyServiceIdentity: true);
+        using var manager = new AsyncDisposableAdapter(new QwenServiceManager(options, new CountingLauncher(), new HttpClient(health)));
+
+        var availability = manager.Value.EnsureAvailableAsync().GetAwaiter().GetResult();
+        var lifecycle = File.ReadAllText(options.LifecycleLogFile);
+
+        Equal(true, availability.Reused, "a healthy service with unavailable PID identity remains reusable as partial");
+        Equal(true, lifecycle.Contains("\"result\":\"partial\"", StringComparison.Ordinal), "partial identity reuse must be explicit in the lifecycle log");
+    }
+    finally
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
 }
 
 static void ColdStartWaitsForHealthAndRecordsOwnership()
@@ -1302,6 +1374,58 @@ static void ModelServiceConfigRejectsNonLoopback()
     Equal(true, errors.Any(error => error.Contains("回环", StringComparison.Ordinal)), "public bind hosts must be rejected even when file checks are disabled");
 }
 
+static void ModelServiceConfigRequiresBooleanFields()
+{
+    var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-required-{Guid.NewGuid():N}");
+    try
+    {
+        Directory.CreateDirectory(System.IO.Path.Combine(root, "llama", "bin"));
+        Directory.CreateDirectory(System.IO.Path.Combine(root, "models"));
+        File.WriteAllText(System.IO.Path.Combine(root, "llama", "bin", "llama-server.exe"), "fixture");
+        File.WriteAllText(System.IO.Path.Combine(root, "models", "model.gguf"), "fixture");
+        var configPath = System.IO.Path.Combine(root, "runtime", "model-service.json");
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(configPath)!);
+        const string validJson = """
+        {
+          "schema_version": 1,
+          "bind_host": "127.0.0.1",
+          "port": 18135,
+          "server_executable": "llama\\bin\\llama-server.exe",
+          "model_path": "models\\model.gguf",
+          "model_alias": "fixture-model",
+          "context_size": 8192,
+          "gpu_layers": 99,
+          "parallel_slots": 2,
+          "reasoning_enabled": true,
+          "use_jinja": true,
+          "startup_timeout_seconds": 180,
+          "auto_start_on_demand": true
+        }
+        """;
+
+        foreach (var missingField in new[] { "reasoning_enabled", "use_jinja", "auto_start_on_demand" })
+        {
+            var document = System.Text.Json.Nodes.JsonNode.Parse(validJson)!.AsObject();
+            document.Remove(missingField);
+            File.WriteAllText(configPath, document.ToJsonString());
+            var rejected = false;
+            try
+            {
+                _ = new ModelServiceConfigStore(root, configPath).Load();
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains(missingField, StringComparison.Ordinal))
+            {
+                rejected = true;
+            }
+            Equal(true, rejected, $"missing required field must be rejected explicitly: {missingField}");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
 static void ModelServiceConfigMigratesLegacySettings()
 {
     var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-migrate-{Guid.NewGuid():N}");
@@ -1385,6 +1509,55 @@ static void ModelStartLockPreservesLiveOwner()
     }
 }
 
+static void ModelStartLockHonorsRecoveryGuard()
+{
+    var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-lock-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    var path = System.IO.Path.Combine(directory, "model-service-start.lock");
+    var recoveryPath = $"{path}.recovery";
+    try
+    {
+        File.WriteAllText(path, "{\"schema_version\":1,\"owner_pid\":2147483647,\"owner_client\":\"memos-codex\",\"acquired_at\":\"2026-08-05T00:00:00Z\",\"config_sha256\":\"old\"}");
+        File.WriteAllText(recoveryPath, $"{{\"schema_version\":1,\"owner_pid\":{Environment.ProcessId},\"owner_client\":\"memos-codex\",\"acquired_at\":\"2026-08-05T00:00:00Z\",\"config_sha256\":\"recovery\"}}");
+        Exception? failure = null;
+        try
+        {
+            _ = ModelServiceStartLock.AcquireAsync(
+                path, "qwen-local", "new", TimeSpan.FromMilliseconds(150), _ => Task.FromResult(false)).GetAwaiter().GetResult();
+        }
+        catch (Exception error) { failure = error; }
+        Equal(true, failure is TimeoutException, "an active recovery guard must block stale-lock deletion");
+        Equal(true, File.Exists(path), "the guarded stale lock must remain intact");
+        Equal(true, File.Exists(recoveryPath), "a competing client must not remove another recovery guard");
+    }
+    finally
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+}
+
+static void ModelStartLockRetiresStaleRecoveryGuard()
+{
+    var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-lock-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    var path = System.IO.Path.Combine(directory, "model-service-start.lock");
+    var recoveryPath = $"{path}.recovery";
+    try
+    {
+        File.WriteAllText(recoveryPath, "{\"schema_version\":1,\"owner_pid\":2147483647,\"owner_client\":\"memos-codex\",\"acquired_at\":\"2026-08-05T00:00:00Z\",\"config_sha256\":\"stale-recovery\"}");
+        var lease = ModelServiceStartLock.AcquireAsync(
+            path, "qwen-local", "new", TimeSpan.FromSeconds(2), _ => Task.FromResult(false)).GetAwaiter().GetResult();
+        Equal(true, lease is not null, "a dead recovery owner must be retired before lock acquisition");
+        lease!.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        Equal(false, File.Exists(recoveryPath), "the stale recovery guard must leave the active guard path");
+        Equal(1, Directory.GetFiles(directory, "model-service-start.lock.recovery.retired.*").Length, "stale recovery content must be retained as one immutable tombstone");
+    }
+    finally
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+}
+
 static void ModelLifecycleLogRedactsPathsAndContent()
 {
     var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-log-{Guid.NewGuid():N}");
@@ -1410,6 +1583,29 @@ static void ModelLifecycleLogRedactsPathsAndContent()
     {
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
     }
+}
+
+static void ModelRestartTransactionRestoresPreviousRuntime()
+{
+    var steps = new List<string>();
+    ModelRestartException? failure = null;
+    try
+    {
+        ModelRestartTransaction.RunAsync(
+            stopPrevious: () => { steps.Add("stop-previous"); return Task.CompletedTask; },
+            startCandidate: () => { steps.Add("start-candidate"); throw new InvalidOperationException("candidate failed"); },
+            restorePersistentState: () => { steps.Add("restore-persistent"); return Task.CompletedTask; },
+            stopCandidate: () => { steps.Add("stop-candidate"); return Task.CompletedTask; },
+            startPrevious: () => { steps.Add("start-previous"); return Task.CompletedTask; }).GetAwaiter().GetResult();
+    }
+    catch (ModelRestartException error)
+    {
+        failure = error;
+    }
+
+    Equal(true, failure is not null, "candidate startup failure must be surfaced");
+    Equal(true, failure!.PreviousRuntimeRestored, "successful rollback must report the previous runtime as restored");
+    Equal("stop-previous,start-candidate,restore-persistent,stop-candidate,start-previous", string.Join(',', steps), "rollback steps must restore disk and runtime in a deterministic order");
 }
 
 static void OwnedModelStopRecordsLifecycle()

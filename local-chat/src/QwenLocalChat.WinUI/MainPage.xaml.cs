@@ -397,11 +397,53 @@ public sealed partial class MainPage : Page
             if (_modelManager is { OwnsModel: true })
             {
                 SetNotice("正在按新启动参数重启本窗口拥有的模型…", WarningText);
-                await _modelManager.StopOwnedAsync("settings_restart");
-                await _modelManager.DisposeAsync();
-                _chatClient?.Dispose();
-                CreateModelClients(candidate);
-                await InitializeModelAsync();
+                await ModelRestartTransaction.RunAsync(
+                    stopPrevious: async () =>
+                    {
+                        await _modelManager.StopOwnedAsync("settings_restart");
+                        await _modelManager.DisposeAsync();
+                        _chatClient?.Dispose();
+                        _modelManager = null;
+                        _chatClient = null;
+                    },
+                    startCandidate: async () =>
+                    {
+                        CreateModelClients(candidate);
+                        await InitializeModelAsync(throwOnFailure: true);
+                    },
+                    restorePersistentState: () =>
+                    {
+                        _settings = previous;
+                        _modelConfig = previousModelConfig;
+                        _modelConfigStore.Save(previousModelConfig);
+                        _settingsStore.Save(previous);
+                        return Task.CompletedTask;
+                    },
+                    stopCandidate: async () =>
+                    {
+                        var candidateManager = _modelManager;
+                        var candidateChatClient = _chatClient;
+                        _modelManager = null;
+                        _chatClient = null;
+                        try
+                        {
+                            if (candidateManager is { OwnsModel: true })
+                                await candidateManager.StopOwnedAsync("settings_restart_rollback");
+                        }
+                        finally
+                        {
+                            if (candidateManager is not null)
+                                await candidateManager.DisposeAsync();
+                            candidateChatClient?.Dispose();
+                        }
+                    },
+                    startPrevious: async () =>
+                    {
+                        _settings = previous;
+                        _modelConfig = previousModelConfig;
+                        CreateModelClients(previous);
+                        await InitializeModelAsync(throwOnFailure: true);
+                    });
                 SetNotice(candidate.DescribeSaveResult(previous, modelOwnedByWindow: true), MutedText);
             }
             else
@@ -418,11 +460,19 @@ public sealed partial class MainPage : Page
                 try { _modelConfigStore.Save(previousModelConfig); } catch { }
             }
             try { _settingsStore.Save(previous); } catch { }
+            if (error is ModelRestartException restartError)
+            {
+                var rollbackStatus = restartError.PreviousRuntimeRestored
+                    ? "已恢复原设置和原模型运行状态"
+                    : "已恢复磁盘设置，模型运行状态仍需处理";
+                SetNotice($"设置应用失败；{rollbackStatus}：{restartError.ApplyError.Message}", ErrorText);
+                return;
+            }
             SetNotice($"设置应用失败，已恢复原参数：{error.Message}", ErrorText);
         }
     }
 
-    private async Task InitializeModelAsync()
+    private async Task InitializeModelAsync(bool throwOnFailure = false)
     {
         if (_modelManager is null) return;
         try
@@ -440,6 +490,7 @@ public sealed partial class MainPage : Page
         }
         catch (Exception error)
         {
+            if (throwOnFailure) throw;
             SetStatus(QwenStatusText, "× 模型不可用", ErrorText);
             SetNotice($"模型启动失败：{error.Message}", ErrorText);
         }
