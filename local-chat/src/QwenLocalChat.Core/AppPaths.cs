@@ -7,8 +7,9 @@ public sealed record AppPaths(
     string SessionsFile,
     string LogsRoot,
     string DiagnosticsRoot,
-    string ServerExecutable,
-    string ModelFile,
+    string ModelServiceConfigFile,
+    string ModelStartLockFile,
+    string ModelLifecycleLogFile,
     string ModelLogFile,
     string McpServerScript)
 {
@@ -27,8 +28,9 @@ public sealed record AppPaths(
             System.IO.Path.Combine(localChatRoot, "data", "sessions.json"),
             System.IO.Path.Combine(localChatRoot, "logs"),
             System.IO.Path.Combine(localChatRoot, "diagnostics"),
-            System.IO.Path.Combine(projectRoot, "llama", "bin", "llama-server.exe"),
-            System.IO.Path.Combine(projectRoot, "models", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf"),
+            ModelServiceConfigStore.ResolveConfigPath(projectRoot),
+            System.IO.Path.Combine(projectRoot, "runtime", "locks", "model-service-start.lock"),
+            System.IO.Path.Combine(projectRoot, "runtime", "logs", "model-service-lifecycle.jsonl"),
             System.IO.Path.Combine(localChatRoot, "diagnostics", "llama-local-chat.log"),
             System.IO.Path.Combine(projectRoot, "scripts", "mcp-server.mjs"));
     }

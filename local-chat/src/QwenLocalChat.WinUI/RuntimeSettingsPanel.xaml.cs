@@ -237,6 +237,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         ModelAliasBox.Text = settings.ModelAlias;
         ModelPathBox.Text = settings.ModelPath;
         PortBox.Value = settings.Port;
+        AutoStartOnDemandToggle.IsOn = settings.AutoStartOnDemand;
         SelectSessionSortMode(settings.SessionSortMode);
         MemosStatusReadonlyText.Text = settings.UseMemos ? "MemOS 长期记忆：开启" : "MemOS 长期记忆：关闭";
         LogStatusReadonlyText.Text = settings.SaveChatLogs ? "聊天日志：开启" : "聊天日志：关闭";
@@ -293,6 +294,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             ModelAlias = ModelAliasBox.Text.Trim(),
             ModelPath = ModelPathBox.Text.Trim(),
             Port = Whole(PortBox),
+            AutoStartOnDemand = AutoStartOnDemandToggle.IsOn,
             SessionSortMode = ReadSessionSortMode(),
         };
 
@@ -306,6 +308,16 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         {
             UseMemos = _original.UseMemos,
             SaveChatLogs = _original.SaveChatLogs,
+            ContextSize = _original.ContextSize,
+            GpuLayers = _original.GpuLayers,
+            ParallelSlots = _original.ParallelSlots,
+            ReasoningEnabled = _original.ReasoningEnabled,
+            UseJinja = _original.UseJinja,
+            ModelAlias = _original.ModelAlias,
+            ModelPath = _original.ModelPath,
+            Port = _original.Port,
+            StartupTimeoutSeconds = _original.StartupTimeoutSeconds,
+            AutoStartOnDemand = _original.AutoStartOnDemand,
         });
     }
 

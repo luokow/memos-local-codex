@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +11,8 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { bootstrapMemoryCoreFull } from "@memtensor/memos-local-plugin/dist/core/pipeline/index.js";
+import { loadConfig } from "@memtensor/memos-local-plugin/dist/core/config/index.js";
+import { ensureModelService, loadModelServiceConfig, probeModelService } from "./model-service.mjs";
 
 for (const key of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MEMOS_API_KEY"]) {
   delete process.env[key];
@@ -21,14 +22,9 @@ process.env.TRANSFORMERS_OFFLINE = "1";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
-const runtimeRoot = path.join(root, "runtime");
-const configFile = path.join(runtimeRoot, "config.yaml");
-const transformersCache = path.join(runtimeRoot, "transformers-cache");
-const llamaExe = path.join(root, "llama", "bin", "llama-server.exe");
-const modelFile = path.join(root, "models", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf");
-const llamaLog = path.join(runtimeRoot, "logs", "llama-server.log");
-const llamaHealthUrl = "http://127.0.0.1:18135/health";
-const reuseLlmOnly = process.env.MEMOS_REUSE_LLM_ONLY === "1";
+const runtimeRoot = path.resolve(process.env.MEMOS_HOME || path.join(root, "runtime"));
+const configFile = path.resolve(process.env.MEMOS_CONFIG_FILE || path.join(runtimeRoot, "config.yaml"));
+const transformersCache = path.resolve(process.env.MEMOS_TRANSFORMERS_CACHE || path.join(root, "runtime", "transformers-cache"));
 const namespace = {
   agentKind: "codex",
   profileId: "local",
@@ -39,6 +35,7 @@ const namespace = {
 
 let core = null;
 let ownedLlama = null;
+let runtimeConfig = null;
 let shuttingDown = false;
 const knownSessions = new Map();
 const defaultSessionKey = `codex-${randomUUID()}`;
@@ -59,49 +56,35 @@ async function pathExists(target) {
   }
 }
 
-async function localHealth() {
-  try {
-    const response = await fetch(llamaHealthUrl, { signal: AbortSignal.timeout(1500) });
-    return response.ok;
-  } catch {
-    return false;
-  }
+function applyModelEndpoint(config) {
+  const host = config.bind_host === "::1" ? "[::1]" : config.bind_host;
+  runtimeConfig.llm.endpoint = `http://${host}:${config.port}/v1/chat/completions`;
+  runtimeConfig.llm.model = config.model_alias;
+  runtimeConfig.llm.fallbackToHost = false;
 }
 
-async function ensureLocalLlm() {
-  if (await localHealth()) return { reused: true };
-  if (reuseLlmOnly) {
-    throw new Error(`Local LLM is unavailable at ${llamaHealthUrl}; MEMOS_REUSE_LLM_ONLY forbids starting another model process`);
-  }
-  if (!(await pathExists(llamaExe))) throw new Error(`Missing local LLM server: ${llamaExe}`);
-  if (!(await pathExists(modelFile))) throw new Error(`Missing local LLM model: ${modelFile}`);
-  await fsp.mkdir(path.dirname(llamaLog), { recursive: true });
-  const logHandle = fs.openSync(llamaLog, "a");
-  ownedLlama = spawn(
-    llamaExe,
-    [
-      "--model", modelFile,
-      "--alias", "qwen3.5:9b-uncensored-local",
-      "--host", "127.0.0.1",
-      "--port", "18135",
-      "--ctx-size", "8192",
-      "--n-gpu-layers", "99",
-      "--reasoning", "off",
-      "--jinja",
-    ],
-    { cwd: path.dirname(llamaExe), windowsHide: true, stdio: ["ignore", logHandle, logHandle] },
-  );
-  fs.closeSync(logHandle);
+async function ensureLocalLlm(reason) {
+  const result = await ensureModelService({ root, reason });
+  applyModelEndpoint(result.config);
+  if (result.child) ownedLlama = result.child;
+  return result;
+}
 
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    if (ownedLlama.exitCode !== null) {
-      throw new Error(`Local LLM server exited with code ${ownedLlama.exitCode}; see ${llamaLog}`);
-    }
-    if (await localHealth()) return { reused: false, pid: ownedLlama.pid };
-    await new Promise((resolve) => setTimeout(resolve, 750));
+async function localModelHealth() {
+  try {
+    const loaded = await loadModelServiceConfig({ root });
+    const state = await probeModelService(loaded.config, root);
+    const host = loaded.config.bind_host === "::1" ? "[::1]" : loaded.config.bind_host;
+    return {
+      healthy: state.healthy,
+      identity: state.identity,
+      endpoint: `http://${host}:${loaded.config.port}`,
+      config_ok: true,
+      config_sha256: loaded.configSha256,
+    };
+  } catch (error) {
+    return { healthy: false, identity: "unavailable", config_ok: false, error_code: error?.code ?? "config_invalid", message: error instanceof Error ? error.message : String(error) };
   }
-  throw new Error(`Local LLM server did not become healthy; see ${llamaLog}`);
 }
 
 async function configureOfflineEmbedding() {
@@ -135,6 +118,7 @@ async function remember(args) {
   if (userMessage.length > 12_000 || assistantResponse.length > 24_000) {
     throw new Error("memory payload exceeds the local safety limit");
   }
+  await ensureLocalLlm("foreground_remember");
   const sessionId = await getSession(args?.session_id);
   const started = await core.onTurnStart({
     agent: "codex",
@@ -171,6 +155,7 @@ async function recall(args) {
   const query = String(args?.query ?? "").trim();
   if (!query) throw new Error("query is required");
   if (query.length > 4_000) throw new Error("query exceeds 4000 characters");
+  await ensureLocalLlm("foreground_recall");
   const top = Math.max(1, Math.min(10, Number(args?.top_k ?? 5)));
   const result = await core.searchMemory({
     agent: "codex",
@@ -239,9 +224,6 @@ async function shutdown() {
   }
 }
 
-await fsp.access(configFile, fs.constants.R_OK);
-await ensureLocalLlm();
-await configureOfflineEmbedding();
 const home = {
   root: runtimeRoot,
   configFile,
@@ -251,10 +233,18 @@ const home = {
   logsDir: path.join(runtimeRoot, "logs"),
   daemonDir: path.join(runtimeRoot, "daemon"),
 };
+await fsp.access(configFile, fs.constants.R_OK);
+const bootModel = await loadModelServiceConfig({ root });
+const loadedRuntime = await loadConfig(home);
+runtimeConfig = structuredClone(loadedRuntime.config);
+applyModelEndpoint(bootModel.config);
+await configureOfflineEmbedding();
 ({ core } = await bootstrapMemoryCoreFull({
   agent: "codex",
   namespace,
   home,
+  config: runtimeConfig,
+  autoRecovery: false,
   pkgVersion: "2.0.12-codex-local",
   hostLlmBridge: null,
   telemetry: null,
@@ -273,7 +263,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "memos_recall") return textResult(await recall(args));
     if (name === "memos_remember") return textResult(await remember(args));
     if (name === "memos_health") {
-      return textResult({ ...(await core.health()), local_llm: { healthy: await localHealth(), endpoint: llamaHealthUrl } });
+      return textResult({ ...(await core.health()), local_llm: await localModelHealth() });
     }
     if (name === "memos_list_recent") {
       const limit = Math.max(1, Math.min(50, Number(args?.limit ?? 10)));
@@ -287,7 +277,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     return textResult({ error: `Unknown tool: ${name}` }, true);
   } catch (error) {
-    return textResult({ error: error instanceof Error ? error.message : String(error) }, true);
+    return textResult({ error_code: error?.code ?? "tool_failed", error: error instanceof Error ? error.message : String(error) }, true);
   }
 });
 

@@ -34,6 +34,8 @@ public sealed partial class MainPage : Page
     private bool _suppressSessionPicker;
     private AppPaths? _paths;
     private SettingsStore? _settingsStore;
+    private ModelServiceConfigStore? _modelConfigStore;
+    private ModelServiceConfig? _modelConfig;
     private ConversationSessionStore? _sessionStore;
     private QwenServiceManager? _modelManager;
     private QwenChatClient? _chatClient;
@@ -113,7 +115,11 @@ public sealed partial class MainPage : Page
             _paths = AppPaths.Discover();
             _initializationStage = "加载设置";
             _settingsStore = new SettingsStore(_paths.SettingsFile);
+            _modelConfigStore = new ModelServiceConfigStore(_paths.ProjectRoot, _paths.ModelServiceConfigFile);
+            var modelConfigLoad = _modelConfigStore.LoadOrMigrate(_paths.SettingsFile);
+            _modelConfig = modelConfigLoad.Config;
             LoadSettings();
+            if (modelConfigLoad.Migrated) _settingsStore.Save(_settings);
             _initializationStage = "创建模型客户端";
             CreateModelClients(_settings);
             _initializationStage = "创建聊天日志";
@@ -133,7 +139,7 @@ public sealed partial class MainPage : Page
             {
                 if (sessionLoad.Warning is not null)
                     SetNotice(sessionLoad.Warning, WarningText);
-                AppendSystem("正在检查本地 Qwen3.5-9B 服务；长期记忆和磁盘日志默认关闭。");
+                AppendSystem("正在检查本地模型服务；长期记忆和磁盘日志默认关闭。");
                 MaybeShowOnboardingTips();
                 CaptureActiveSession();
                 PersistSessions();
@@ -274,7 +280,7 @@ public sealed partial class MainPage : Page
         if (_settingsStore is null) return;
         _loadingSettings = true;
         var loaded = _settingsStore.Load();
-        _settings = loaded.Settings;
+        _settings = _modelConfig is null ? loaded.Settings : loaded.Settings.WithModelService(_modelConfig);
         UseMemosToggle.IsOn = loaded.Settings.UseMemos;
         SaveLogsToggle.IsOn = loaded.Settings.SaveChatLogs;
         if (_chatLog is not null) _chatLog.Enabled = loaded.Settings.SaveChatLogs;
@@ -322,27 +328,17 @@ public sealed partial class MainPage : Page
 
     private void CreateModelClients(LocalChatSettings settings)
     {
-        if (_paths is null) throw new InvalidOperationException("项目路径尚未初始化");
-        var endpointRoot = $"http://127.0.0.1:{settings.Port}";
-        var options = new LocalModelOptions(
-            new Uri($"{endpointRoot}/health"),
-            new Uri($"{endpointRoot}/v1/chat/completions"),
-            _paths.ServerExecutable,
-            settings.ResolveModelFile(_paths.ProjectRoot),
+        if (_paths is null || _modelConfig is null) throw new InvalidOperationException("模型服务配置尚未初始化");
+        var options = _modelConfig.ToLocalModelOptions(
+            _paths.ProjectRoot,
             _paths.ModelLogFile,
-            settings.Port,
-            settings.ModelAlias,
-            settings.ContextSize,
-            settings.GpuLayers,
-            settings.ReasoningEnabled,
-            settings.UseJinja,
-            settings.ParallelSlots,
-            settings.StartupTimeoutSeconds);
+            _paths.ModelStartLockFile,
+            _paths.ModelLifecycleLogFile);
         _modelManager = new QwenServiceManager(options, new WindowsModelProcessLauncher());
         _chatClient = new QwenChatClient(options.ChatCompletionsUri);
         _activeModelSettings = settings;
-        EndpointText.Text = $"LOCAL CORE  /  127.0.0.1:{settings.Port}";
-        if (App.Window is MainWindow window) window.SetEndpointSubtitle(settings.Port);
+        EndpointText.Text = $"LOCAL CORE  /  {_modelConfig.BindHost}:{_modelConfig.Port}";
+        if (App.Window is MainWindow window) window.SetEndpointSubtitle(_modelConfig.BindHost, _modelConfig.Port);
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -370,10 +366,16 @@ public sealed partial class MainPage : Page
         if (_settingsStore is null) return;
 
         var previous = _settings;
+        var previousModelConfig = _modelConfig;
         try
         {
+            if (_modelConfigStore is null || previousModelConfig is null)
+                throw new InvalidOperationException("模型服务配置尚未初始化");
+            var candidateModelConfig = candidate.ApplyToModelService(previousModelConfig);
+            _modelConfigStore.Save(candidateModelConfig);
             _settingsStore.Save(candidate);
             _settings = candidate;
+            _modelConfig = candidateModelConfig;
             ApplySessionSortMode(candidate.ResolveSessionSortMode());
             // Long-form toggles affect the continue / next-segment button immediately.
             if (!candidate.SegmentedLongForm)
@@ -395,7 +397,7 @@ public sealed partial class MainPage : Page
             if (_modelManager is { OwnsModel: true })
             {
                 SetNotice("正在按新启动参数重启本窗口拥有的模型…", WarningText);
-                await _modelManager.StopOwnedAsync();
+                await _modelManager.StopOwnedAsync("settings_restart");
                 await _modelManager.DisposeAsync();
                 _chatClient?.Dispose();
                 CreateModelClients(candidate);
@@ -410,6 +412,11 @@ public sealed partial class MainPage : Page
         catch (Exception error)
         {
             _settings = previous;
+            _modelConfig = previousModelConfig;
+            if (previousModelConfig is not null && _modelConfigStore is not null)
+            {
+                try { _modelConfigStore.Save(previousModelConfig); } catch { }
+            }
             try { _settingsStore.Save(previous); } catch { }
             SetNotice($"设置应用失败，已恢复原参数：{error.Message}", ErrorText);
         }
@@ -420,20 +427,20 @@ public sealed partial class MainPage : Page
         if (_modelManager is null) return;
         try
         {
-            SetStatus(QwenStatusText, "• 9B 检查中", WarningText);
+            SetStatus(QwenStatusText, "• 模型检查中", WarningText);
             var availability = await _modelManager.EnsureAvailableAsync();
-            SetStatus(QwenStatusText, availability.Reused ? "• 9B 已复用" : "• 9B 已启动", PrimaryText);
+            SetStatus(QwenStatusText, availability.Reused ? "• 模型已复用" : "• 模型已启动", PrimaryText);
             SetNotice($"模型只监听 127.0.0.1:{_activeModelSettings.Port}。", MutedText);
             // Lifecycle notice: dedupe + not persisted (avoids duplicate rows after session restore).
             AppendSystem(availability.Reused
-                ? "已复用当前 Qwen3.5-9B 服务，可以开始对话。"
-                : "Qwen3.5-9B 已由本窗口启动，可以开始对话。",
+                ? "已复用当前本地模型服务，可以开始对话。"
+                : "本地模型服务已由本窗口启动，可以开始对话。",
                 dedupeIdentical: true);
             InputBox.Focus(FocusState.Programmatic);
         }
         catch (Exception error)
         {
-            SetStatus(QwenStatusText, "× 9B 不可用", ErrorText);
+            SetStatus(QwenStatusText, "× 模型不可用", ErrorText);
             SetNotice($"模型启动失败：{error.Message}", ErrorText);
         }
     }
@@ -653,10 +660,10 @@ public sealed partial class MainPage : Page
         try
         {
             if (IsViewingSession(gen.SessionId))
-                SetStatus(QwenStatusText, "• 9B 检查中", WarningText);
+                SetStatus(QwenStatusText, "• 模型检查中", WarningText);
             await _modelManager.EnsureAvailableAsync(sendToken);
             if (IsViewingSession(gen.SessionId))
-                SetStatus(QwenStatusText, _modelManager.OwnsModel ? "• 9B 已启动" : "• 9B 已复用", PrimaryText);
+                SetStatus(QwenStatusText, _modelManager.OwnsModel ? "• 模型已启动" : "• 模型已复用", PrimaryText);
 
             string? memoryContext = null;
             MemosStdioClient? memoryClient = null;

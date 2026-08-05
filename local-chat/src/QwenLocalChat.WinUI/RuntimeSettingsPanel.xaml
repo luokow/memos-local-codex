@@ -158,7 +158,7 @@
                                 <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
                                 <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <NumberBox x:Name="ContextSizeBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="ContextSizeSetting" Header="上下文窗口" Minimum="2048" Maximum="32768" SmallChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="本机 9B Q4 + 8GB 显存实测可开 32768；需重启模型" />
+                                    <NumberBox x:Name="ContextSizeBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="ContextSizeSetting" Header="上下文窗口" Minimum="2048" Maximum="32768" SmallChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="模型服务的上下文容量，修改后需重启模型" />
                                     <NumberBox x:Name="MaxHistoryRoundsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="1" AutomationProperties.AutomationId="MaxHistoryRoundsSetting" Header="历史轮数" Minimum="1" Maximum="100" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="参与上下文的最近完整问答轮数；默认 40" />
                                     <NumberBox x:Name="MemosTopKBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="2" AutomationProperties.AutomationId="MemosTopKSetting" Header="MemOS 召回" Minimum="1" Maximum="20" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
                                 </Grid>
@@ -186,7 +186,7 @@
                                     <NumberBox x:Name="GpuLayersBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="GpuLayersSetting" Header="GPU 层" Minimum="0" Maximum="999" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
                                     <NumberBox x:Name="ParallelSlotsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="1" AutomationProperties.AutomationId="ParallelSlotsSetting" Header="并发槽位" Minimum="1" Maximum="8" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="可同时生成的会话数。启用共享 KV：平时只跑一路时尽量用满「上下文窗口」；多路同时生成时才共享同一池，无需为并发永久切短单路窗口。" />
                                     <NumberBox x:Name="StartupTimeoutBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="2" AutomationProperties.AutomationId="StartupTimeoutSetting" Header="启动等待（秒）" Minimum="30" Maximum="600" SmallChange="30" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <ToggleSwitch x:Name="ReasoningToggle" Grid.Row="1" AutomationProperties.AutomationId="ReasoningSetting" Header="思考模式" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="开启后会限制思考长度，把更多额度留给正文；长文写作可关" />
+                                    <ToggleSwitch x:Name="ReasoningToggle" Grid.Row="1" AutomationProperties.AutomationId="ReasoningSetting" Header="思考模式" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="控制模型服务的思考模式，修改后需重启模型" />
                                     <ToggleSwitch x:Name="JinjaToggle" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="JinjaSetting" Header="Jinja 模板" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="用模型自带对话模板，建议保持开启" />
                                 </Grid>
                                 <TextBox x:Name="ModelAliasBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="ModelAliasSetting" Header="模型别名" />
@@ -201,15 +201,17 @@
                                     <TextBlock Text="端口变更需重启模型" Style="{StaticResource SettingsSectionHintStyle}" />
                                 </StackPanel>
                                 <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <Grid ColumnSpacing="12">
+                                <Grid ColumnSpacing="12" RowSpacing="8">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                     <NumberBox x:Name="PortBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="PortSetting" Header="端口" Minimum="1024" Maximum="65535" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
                                     <Border Grid.Column="1" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8" VerticalAlignment="Top">
                                         <StackPanel Spacing="4">
                                             <TextBlock Text="固定安全边界" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
-                                            <TextBlock Text="仅监听 127.0.0.1；禁用系统代理；MemOS 只复用现有模型；不向子进程传递云 API 密钥。" Style="{StaticResource SettingsSectionHintStyle}" />
+                                            <TextBlock Text="服务监听 127.0.0.1；子进程使用本地模型配置。" Style="{StaticResource SettingsSectionHintStyle}" />
                                         </StackPanel>
                                     </Border>
+                                    <ToggleSwitch x:Name="AutoStartOnDemandToggle" AutomationProperties.AutomationId="AutoStartOnDemandSetting" Grid.Row="1" Grid.ColumnSpan="2" Header="记忆调用按需启动模型" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="MemOS 的 recall 和 remember 在服务停止时可启动共享模型；健康检查和列表查询不会启动" />
                                 </Grid>
                             </StackPanel>
                         </Border>

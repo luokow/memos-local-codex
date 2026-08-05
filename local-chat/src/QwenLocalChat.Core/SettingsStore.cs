@@ -51,8 +51,8 @@ public static class SettingsNumberInput
 
 public sealed record LocalChatSettings
 {
-    public const string DefaultModelAlias = "qwen3.5:9b-uncensored-local";
-    public const string DefaultModelPath = @"models\Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf";
+    public const string DefaultModelAlias = "local-model";
+    public const string DefaultModelPath = "";
 
     // Neutral sampling by default so free-form quality stays natural.
     // Stronger anti-rep (freq/DRY/…) is opt-in via settings when long loops reappear.
@@ -79,14 +79,7 @@ public sealed record LocalChatSettings
     [JsonPropertyName("save_chat_logs")]
     public bool SaveChatLogs { get; init; }
 
-    /// <summary>
-    /// Defaults tuned for RTX 4070 Laptop 8GB + Qwen3.5 9B Q6_K
-    /// (ctx 8192 loads ~7.1GB; higher ctx leaves little headroom on 8GB).
-    /// </summary>
-    /// <summary>
-    /// Per-request generation cap. 4096 is the practical quality ceiling on 9B Q6;
-    /// 8192+ often fills the budget with idiom/slogan tails on free-form long prose.
-    /// </summary>
+    /// <summary>Per-request generation cap.</summary>
     [JsonPropertyName("max_output_tokens")]
     public int MaxOutputTokens { get; init; } = 4_096;
 
@@ -141,38 +134,41 @@ public sealed record LocalChatSettings
     [JsonPropertyName("request_timeout_seconds")]
     public int RequestTimeoutSeconds { get; init; } = 900;
 
-    [JsonPropertyName("context_size")]
-    public int ContextSize { get; init; } = 8_192;
+    [JsonIgnore]
+    public int ContextSize { get; init; }
 
     [JsonPropertyName("max_history_rounds")]
     public int MaxHistoryRounds { get; init; } = 40;
 
-    [JsonPropertyName("gpu_layers")]
-    public int GpuLayers { get; init; } = 99;
+    [JsonIgnore]
+    public int GpuLayers { get; init; }
 
-    [JsonPropertyName("parallel_slots")]
-    public int ParallelSlots { get; init; } = 1;
+    [JsonIgnore]
+    public int ParallelSlots { get; init; }
 
-    [JsonPropertyName("reasoning_enabled")]
+    [JsonIgnore]
     public bool ReasoningEnabled { get; init; }
 
-    [JsonPropertyName("use_jinja")]
-    public bool UseJinja { get; init; } = true;
+    [JsonIgnore]
+    public bool UseJinja { get; init; }
 
-    [JsonPropertyName("model_alias")]
+    [JsonIgnore]
     public string ModelAlias { get; init; } = DefaultModelAlias;
 
-    [JsonPropertyName("model_path")]
+    [JsonIgnore]
     public string ModelPath { get; init; } = DefaultModelPath;
 
     [JsonPropertyName("memos_top_k")]
     public int MemosTopK { get; init; } = 5;
 
-    [JsonPropertyName("port")]
-    public int Port { get; init; } = 18135;
+    [JsonIgnore]
+    public int Port { get; init; }
 
-    [JsonPropertyName("startup_timeout_seconds")]
-    public int StartupTimeoutSeconds { get; init; } = 180;
+    [JsonIgnore]
+    public int StartupTimeoutSeconds { get; init; }
+
+    [JsonIgnore]
+    public bool AutoStartOnDemand { get; init; }
 
     /// <summary>
     /// Whether the one-time first-run tips have already been shown.
@@ -245,6 +241,7 @@ public sealed record LocalChatSettings
                && left.MemosTopK == right.MemosTopK
                && left.Port == right.Port
                && left.StartupTimeoutSeconds == right.StartupTimeoutSeconds
+               && left.AutoStartOnDemand == right.AutoStartOnDemand
                && left.UseMemos == right.UseMemos
                && left.SaveChatLogs == right.SaveChatLogs
                && left.OnboardingSeen == right.OnboardingSeen
@@ -315,6 +312,8 @@ public sealed record LocalChatSettings
             bits.Add("历史轮数");
         if (left.MemosTopK != right.MemosTopK)
             bits.Add("MemOS 召回");
+        if (left.AutoStartOnDemand != right.AutoStartOnDemand)
+            bits.Add(left.AutoStartOnDemand ? "按需启动·开" : "按需启动·关");
         if (!string.Equals(
                 SessionSortModes.Normalize(left.SessionSortMode),
                 SessionSortModes.Normalize(right.SessionSortMode),
@@ -353,6 +352,36 @@ public sealed record LocalChatSettings
             ? System.IO.Path.GetFullPath(ModelPath)
             : System.IO.Path.GetFullPath(System.IO.Path.Combine(projectRoot, ModelPath));
 
+    public LocalChatSettings WithModelService(ModelServiceConfig config)
+        => this with
+        {
+            ContextSize = config.ContextSize,
+            GpuLayers = config.GpuLayers,
+            ParallelSlots = config.ParallelSlots,
+            ReasoningEnabled = config.ReasoningEnabled,
+            UseJinja = config.UseJinja,
+            ModelAlias = config.ModelAlias,
+            ModelPath = config.ModelPath,
+            Port = config.Port,
+            StartupTimeoutSeconds = config.StartupTimeoutSeconds,
+            AutoStartOnDemand = config.AutoStartOnDemand,
+        };
+
+    public ModelServiceConfig ApplyToModelService(ModelServiceConfig current)
+        => current with
+        {
+            ContextSize = ContextSize,
+            GpuLayers = GpuLayers,
+            ParallelSlots = ParallelSlots,
+            ReasoningEnabled = ReasoningEnabled,
+            UseJinja = UseJinja,
+            ModelAlias = ModelAlias,
+            ModelPath = ModelPath,
+            Port = Port,
+            StartupTimeoutSeconds = StartupTimeoutSeconds,
+            AutoStartOnDemand = AutoStartOnDemand,
+        };
+
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
@@ -364,21 +393,12 @@ public sealed record LocalChatSettings
         AddRangeError(errors, RepeatLastN, 0, 2_048, "重复检测窗口");
         if (DryMultiplier is < 0 or > 5) errors.Add("DRY 抗重复必须在 0 到 5 之间（0 为关闭）");
         AddRangeError(errors, RequestTimeoutSeconds, 30, 1_800, "请求超时秒数");
-        AddRangeError(errors, ContextSize, 2_048, 32_768, "上下文窗口");
         AddRangeError(errors, MaxHistoryRounds, 1, 100, "历史轮数");
-        AddRangeError(errors, GpuLayers, 0, 999, "GPU 层数");
-        AddRangeError(errors, ParallelSlots, 1, 8, "并发槽位");
         AddRangeError(errors, MemosTopK, 1, 20, "MemOS 召回数量");
-        AddRangeError(errors, Port, 1_024, 65_535, "服务端口");
-        AddRangeError(errors, StartupTimeoutSeconds, 30, 600, "启动等待秒数");
-        if (MaxOutputTokens > ContextSize - 512)
-            errors.Add("最大输出 Token 必须至少为上下文窗口保留 512 Token 的输入空间");
-        // Laptop 9B Q4 is often ~20–40 tok/s; require timeout ≥ max_tokens/20 + 60s headroom.
+        // Keep enough headroom for local generation throughput and first-token latency.
         var minTimeout = MaxOutputTokens / 20 + 60;
         if (RequestTimeoutSeconds < minTimeout)
             errors.Add($"请求超时过短：最大输出 {MaxOutputTokens} 时建议至少 {minTimeout} 秒，否则长文可能中途超时");
-        if (string.IsNullOrWhiteSpace(ModelAlias)) errors.Add("模型别名不能为空");
-        if (string.IsNullOrWhiteSpace(ModelPath)) errors.Add("模型文件不能为空");
         return errors;
     }
 

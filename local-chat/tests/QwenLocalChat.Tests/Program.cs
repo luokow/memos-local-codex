@@ -5,6 +5,13 @@ var tests = new (string Name, Action Body)[]
 {
     ("settings-roundtrip", SettingsRoundTrip),
     ("settings-defaults-and-legacy-migration", SettingsDefaultsAndLegacyMigration),
+    ("model-service-config-roundtrip-and-canonicalization", ModelServiceConfigRoundTripAndCanonicalization),
+    ("model-service-config-rejects-non-loopback", ModelServiceConfigRejectsNonLoopback),
+    ("model-service-config-migrates-legacy-settings", ModelServiceConfigMigratesLegacySettings),
+    ("model-start-lock-recovers-dead-owner", ModelStartLockRecoversDeadOwner),
+    ("model-start-lock-preserves-live-owner", ModelStartLockPreservesLiveOwner),
+    ("model-lifecycle-log-redacts-paths-and-content", ModelLifecycleLogRedactsPathsAndContent),
+    ("owned-model-stop-records-lifecycle", OwnedModelStopRecordsLifecycle),
     ("settings-number-input-prefers-visible-uncommitted-text", SettingsNumberInputPrefersVisibleUncommittedText),
     ("generation-options-from-settings-carry-anti-repetition", GenerationOptionsFromSettingsCarryAntiRepetition),
     ("context-keeps-latest-20-rounds", ContextKeepsLatest20Rounds),
@@ -445,7 +452,7 @@ static void HealthyModelIsReused()
         "unused-server.exe",
         "unused-model.gguf",
         "unused.log",
-        server.Port);
+        server.Port, "fixture", 4096, 0, false, false, 1, 30);
     using var manager = new AsyncDisposableAdapter(new QwenServiceManager(options, launcher));
 
     var availability = manager.Value.EnsureAvailableAsync().GetAwaiter().GetResult();
@@ -470,7 +477,7 @@ static void ColdStartWaitsForHealthAndRecordsOwnership()
         System.IO.Path.Combine(temp, "server.exe"),
         System.IO.Path.Combine(temp, "model.gguf"),
         System.IO.Path.Combine(temp, "server.log"),
-        port);
+        port, "fixture", 4096, 0, false, false, 1, 30);
     using var manager = new AsyncDisposableAdapter(new QwenServiceManager(options, launcher, new HttpClient(health)));
 
     var availability = manager.Value.EnsureAvailableAsync().GetAwaiter().GetResult();
@@ -497,16 +504,16 @@ static void ModelLaunchCommandUsesRuntimeSettings()
 
     var arguments = ModelLaunchCommand.BuildArguments(options);
 
-    Equal("--model|custom.gguf|--alias|custom-alias|--host|127.0.0.1|--port|18136|--ctx-size|12288|--n-gpu-layers|80|--reasoning|on|--reasoning-budget|1536|--parallel|2|--kv-unified",
+    Equal("--model|custom.gguf|--alias|custom-alias|--host|127.0.0.1|--port|18136|--ctx-size|12288|--n-gpu-layers|80|--reasoning|on|--parallel|2|--kv-unified",
         string.Join('|', arguments),
-        "restart-bound settings reach llama-server; reasoning budget + unified KV when parallel>1");
+        "restart-bound settings reach llama-server without a hidden reasoning budget; unified KV follows parallel slots");
 
     var singleSlot = options with { ParallelSlots = 1, ReasoningEnabled = false };
     var singleArgs = ModelLaunchCommand.BuildArguments(singleSlot);
     Equal(false, singleArgs.Contains("--kv-unified"),
         "single-slot launches do not need unified KV");
     Equal(false, singleArgs.Contains("--reasoning-budget"),
-        "reasoning budget flag is omitted when thinking is off");
+        "the launcher must not inject a second hard-coded reasoning setting");
 }
 
 static void OccupiedUnhealthyPortBlocksModelLaunch()
@@ -516,7 +523,8 @@ static void OccupiedUnhealthyPortBlocksModelLaunch()
     var options = new LocalModelOptions(
         new Uri($"http://127.0.0.1:{server.Port}/health"),
         new Uri($"http://127.0.0.1:{server.Port}/v1/chat/completions"),
-        "unused-server.exe", "unused-model.gguf", "unused.log", server.Port);
+        "unused-server.exe", "unused-model.gguf", "unused.log", server.Port,
+        "fixture", 4096, 0, false, false, 1, 30);
     using var manager = new AsyncDisposableAdapter(new QwenServiceManager(options, launcher));
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
 
@@ -904,6 +912,7 @@ static void AppPathsHandleTrailingDirectorySeparator()
         Equal("D:\\codex\\experiments\\memos-local-codex", paths.ProjectRoot, "the project root must be the parent of local-chat even when the app base has a trailing separator");
         Equal("D:\\codex\\experiments\\memos-local-codex\\scripts\\mcp-server.mjs", paths.McpServerScript, "the MCP entry must resolve outside local-chat");
         Equal("D:\\codex\\experiments\\memos-local-codex\\local-chat\\data\\sessions.json", paths.SessionsFile, "sessions must live under local-chat/data");
+        Equal("D:\\codex\\experiments\\memos-local-codex\\runtime\\model-service.json", paths.ModelServiceConfigFile, "both clients must discover the same shared model config");
     }
     finally
     {
@@ -928,15 +937,30 @@ static void SettingsRoundTrip()
             MaxOutputTokens = 3072,
             Temperature = 0.35,
             StreamResponses = false,
-            ContextSize = 12288,
             MaxHistoryRounds = 12,
             MemosTopK = 8,
-            Port = 18136,
         };
         store.Save(customized);
 
         var reloaded = new SettingsStore(path).Load().Settings;
-        Equal(customized, reloaded, "all saved runtime settings must survive a new store instance");
+        Equal(customized, reloaded, "all saved chat settings must survive a new store instance");
+        var savedJson = File.ReadAllText(path);
+        Equal(false, savedJson.Contains("model_path", StringComparison.Ordinal), "chat settings must not duplicate the shared model path");
+        Equal(false, savedJson.Contains("context_size", StringComparison.Ordinal), "chat settings must not duplicate model startup parameters");
+        var combined = reloaded.WithModelService(new ModelServiceConfig
+        {
+            SchemaVersion = 1, BindHost = "127.0.0.1", Port = 19001,
+            ServerExecutable = "server.exe", ModelPath = "model.gguf", ModelAlias = "overlay-model",
+            ContextSize = 16384, GpuLayers = 77, ParallelSlots = 4,
+            ReasoningEnabled = true, UseJinja = true, StartupTimeoutSeconds = 90,
+            AutoStartOnDemand = true,
+        });
+        Equal(19001, combined.Port, "the runtime view must receive model fields from the shared config overlay");
+        Equal("overlay-model", combined.ModelAlias, "the shared alias must override neutral chat defaults");
+        Equal(true, combined.AutoStartOnDemand, "the runtime view must receive the shared on-demand policy");
+        var onDemandDisabled = combined with { AutoStartOnDemand = false };
+        Equal(false, onDemandDisabled.ApplyToModelService(new ModelServiceConfig { AutoStartOnDemand = true }).AutoStartOnDemand,
+            "the settings view must write the on-demand policy back to shared config");
     }
     finally
     {
@@ -962,10 +986,10 @@ static void SettingsDefaultsAndLegacyMigration()
     Equal(1.0, defaults.RepeatPenalty, "repeat_penalty 1.0 means off");
     Equal(0, defaults.DryMultiplier, "DRY is off by default");
     Equal(900, defaults.RequestTimeoutSeconds, "timeout must cover worst-case local generation speed");
-    Equal(8_192, defaults.ContextSize, "defaults use ctx 8192 proven stable for 8GB + 9B Q6");
+    Equal(0, defaults.ContextSize, "chat defaults must not carry a second model context value");
     Equal(40, defaults.MaxHistoryRounds, "history ceiling scales with the larger context window");
-    Equal(1, defaults.ParallelSlots, "single slot keeps the full context pool for long chats");
-    Equal(180, defaults.StartupTimeoutSeconds, "larger KV allocation may need a longer startup wait");
+    Equal(0, defaults.ParallelSlots, "chat defaults must not carry a second parallel-slot value");
+    Equal(0, defaults.StartupTimeoutSeconds, "chat defaults must not carry a second model startup timeout");
     Equal(5, defaults.MemosTopK, "MemOS recall must keep the approved default");
     Equal(0, defaults.Validate().Count, "safe defaults must pass validation including timeout vs max_tokens");
 
@@ -980,7 +1004,7 @@ static void SettingsDefaultsAndLegacyMigration()
         Equal(true, migrated.UseMemos, "legacy privacy choices must survive settings migration");
         Equal(false, migrated.SaveChatLogs, "legacy logging choice must survive settings migration");
         Equal(4_096, migrated.MaxOutputTokens, "missing generation settings must receive current defaults");
-        Equal(8_192, migrated.ContextSize, "missing context size must receive the Q6-stable default");
+    Equal(0, migrated.ContextSize, "chat settings loading must leave model context to the shared config overlay");
         Equal(LocalChatSettings.DefaultFrequencyPenalty, migrated.FrequencyPenalty,
             "legacy settings must pick up anti-repetition defaults when fields are absent");
         Equal(LocalChatSettings.DefaultDryMultiplier, migrated.DryMultiplier,
@@ -1182,13 +1206,13 @@ static void WindowCloseWaitsForCleanupBeforeApproval()
 
 static void SystemNoticePolicyFiltersModelLifecycle()
 {
-    Equal(true, SystemNoticePolicy.IsModelLifecycleNotice("已复用当前 Qwen3.5-9B 服务，可以开始对话。"),
+    Equal(true, SystemNoticePolicy.IsModelLifecycleNotice("已复用当前本地模型服务，可以开始对话。"),
         "reused-service notice is lifecycle chatter");
-    Equal(true, SystemNoticePolicy.IsModelLifecycleNotice("Qwen3.5-9B 已由本窗口启动，可以开始对话。"),
+    Equal(true, SystemNoticePolicy.IsModelLifecycleNotice("本地模型服务已由本窗口启动，可以开始对话。"),
         "owned-start notice is lifecycle chatter");
     Equal(false, SystemNoticePolicy.IsModelLifecycleNotice("新会话已开始。可在顶栏切换或新建会话。"),
         "session UX notices must still be kept");
-    Equal(false, SystemNoticePolicy.ShouldPersist("SYSTEM", "已复用当前 Qwen3.5-9B 服务，可以开始对话。"),
+    Equal(false, SystemNoticePolicy.ShouldPersist("SYSTEM", "已复用当前本地模型服务，可以开始对话。"),
         "lifecycle SYSTEM lines must not re-enter sessions.json");
     Equal(true, SystemNoticePolicy.ShouldPersist("SYSTEM", "新会话已开始。"),
         "real session system lines remain durable");
@@ -1228,6 +1252,212 @@ static void GenerationTranscriptUpsertIsIdempotent()
     Equal("你", session.Transcript[1].Label, "user turn stays once");
     Equal("Qwen", session.Transcript[2].Label, "assistant turn stays once");
     Equal("完整回答", session.Transcript[2].Text, "final assistant text wins");
+}
+
+static void ModelServiceConfigRoundTripAndCanonicalization()
+{
+    var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-config-{Guid.NewGuid():N}");
+    try
+    {
+        Directory.CreateDirectory(System.IO.Path.Combine(root, "llama", "bin"));
+        Directory.CreateDirectory(System.IO.Path.Combine(root, "models"));
+        File.WriteAllText(System.IO.Path.Combine(root, "llama", "bin", "llama-server.exe"), "fixture");
+        File.WriteAllText(System.IO.Path.Combine(root, "models", "model.gguf"), "fixture");
+        var path = System.IO.Path.Combine(root, "runtime", "model-service.json");
+        var store = new ModelServiceConfigStore(root, path);
+        var config = new ModelServiceConfig
+        {
+            SchemaVersion = 1,
+            BindHost = "127.0.0.1",
+            Port = 18135,
+            ServerExecutable = @"llama\bin\llama-server.exe",
+            ModelPath = @"models\model.gguf",
+            ModelAlias = "fixture-model",
+            ContextSize = 8192,
+            GpuLayers = 99,
+            ParallelSlots = 2,
+            ReasoningEnabled = true,
+            UseJinja = true,
+            StartupTimeoutSeconds = 180,
+            AutoStartOnDemand = true,
+        };
+
+        store.Save(config);
+        var loaded = store.Load();
+
+        Equal(config, loaded, "the shared model config must round-trip without defaults or field loss");
+        Equal(System.IO.Path.Combine(root, "models", "model.gguf"), loaded.ResolveModelPath(root), "relative model paths resolve from project root");
+        Equal("{\"auto_start_on_demand\":true,\"bind_host\":\"127.0.0.1\",\"context_size\":8192,\"gpu_layers\":99,\"model_alias\":\"fixture-model\",\"model_path\":\"models\\\\model.gguf\",\"parallel_slots\":2,\"port\":18135,\"reasoning_enabled\":true,\"schema_version\":1,\"server_executable\":\"llama\\\\bin\\\\llama-server.exe\",\"startup_timeout_seconds\":180,\"use_jinja\":true}", loaded.ToCanonicalJson(), "canonical JSON must sort keys for the cross-process lock digest");
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
+static void ModelServiceConfigRejectsNonLoopback()
+{
+    var config = new ModelServiceConfig { BindHost = "0.0.0.0" };
+    var errors = config.Validate(checkFiles: false);
+    Equal(true, errors.Any(error => error.Contains("回环", StringComparison.Ordinal)), "public bind hosts must be rejected even when file checks are disabled");
+}
+
+static void ModelServiceConfigMigratesLegacySettings()
+{
+    var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-migrate-{Guid.NewGuid():N}");
+    try
+    {
+        Directory.CreateDirectory(System.IO.Path.Combine(root, "llama", "bin"));
+        Directory.CreateDirectory(System.IO.Path.Combine(root, "models"));
+        Directory.CreateDirectory(System.IO.Path.Combine(root, "local-chat", "data"));
+        File.WriteAllText(System.IO.Path.Combine(root, "llama", "bin", "llama-server.exe"), "fixture");
+        File.WriteAllText(System.IO.Path.Combine(root, "models", "migrated.gguf"), "fixture");
+        var settingsPath = System.IO.Path.Combine(root, "local-chat", "data", "settings.json");
+        File.WriteAllText(settingsPath, """
+        {
+          "model_path": "models\\migrated.gguf",
+          "model_alias": "migrated-model",
+          "port": 18136,
+          "context_size": 12288,
+          "gpu_layers": 88,
+          "parallel_slots": 3,
+          "reasoning_enabled": true,
+          "use_jinja": false,
+          "startup_timeout_seconds": 240
+        }
+        """);
+        var configPath = System.IO.Path.Combine(root, "runtime", "model-service.json");
+        var result = new ModelServiceConfigStore(root, configPath).LoadOrMigrate(settingsPath);
+
+        Equal(true, result.Migrated, "a missing shared config must migrate the existing Qwen Local model fields once");
+        Equal("migrated-model", result.Config.ModelAlias, "migration must retain the active alias");
+        Equal(18136, result.Config.Port, "migration must retain the active port");
+        Equal(true, result.Config.AutoStartOnDemand, "approved on-demand startup default must be written during migration");
+        Equal(true, File.Exists(configPath), "migration must atomically create the shared config");
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
+static void ModelStartLockRecoversDeadOwner()
+{
+    var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-lock-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    var path = System.IO.Path.Combine(directory, "model-service-start.lock");
+    try
+    {
+        File.WriteAllText(path, "{\"schema_version\":1,\"owner_pid\":2147483647,\"owner_client\":\"memos-codex\",\"acquired_at\":\"2026-08-05T00:00:00Z\",\"config_sha256\":\"old\"}");
+        var lease = ModelServiceStartLock.AcquireAsync(
+            path, "qwen-local", "new", TimeSpan.FromSeconds(2), _ => Task.FromResult(false)).GetAwaiter().GetResult();
+        Equal(true, lease is not null, "a dead owner may be recovered when the model is still unhealthy");
+        lease!.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        Equal(false, File.Exists(path), "the successful owner must release only its own lock file");
+    }
+    finally
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+}
+
+static void ModelStartLockPreservesLiveOwner()
+{
+    var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-lock-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    var path = System.IO.Path.Combine(directory, "model-service-start.lock");
+    try
+    {
+        File.WriteAllText(path, $"{{\"schema_version\":1,\"owner_pid\":{Environment.ProcessId},\"owner_client\":\"memos-codex\",\"acquired_at\":\"2026-08-05T00:00:00Z\",\"config_sha256\":\"live\"}}");
+        Exception? failure = null;
+        try
+        {
+            _ = ModelServiceStartLock.AcquireAsync(
+                path, "qwen-local", "new", TimeSpan.FromMilliseconds(150), _ => Task.FromResult(false)).GetAwaiter().GetResult();
+        }
+        catch (Exception error) { failure = error; }
+        Equal(true, failure is TimeoutException, "a live owner must not be deleted to make progress");
+        Equal(true, File.Exists(path), "the live owner's lock file must remain intact");
+    }
+    finally
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+}
+
+static void ModelLifecycleLogRedactsPathsAndContent()
+{
+    var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-model-log-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    try
+    {
+        var logPath = System.IO.Path.Combine(directory, "lifecycle.jsonl");
+        var options = new LocalModelOptions(
+            new Uri("http://127.0.0.1:19002/health"),
+            new Uri("http://127.0.0.1:19002/v1/chat/completions"),
+            System.IO.Path.Combine(directory, "secret-server.exe"),
+            System.IO.Path.Combine(directory, "private-model.gguf"),
+            System.IO.Path.Combine(directory, "llama.log"),
+            19002, "fixture", 4096, 0, false, false, 1, 30,
+            LifecycleLogFile: logPath, ConfigSha256: "abc");
+        ModelServiceLifecycleLog.AppendAsync(options, "ensure", "qwen_local_start", "failed", 42, "fixture_failure").GetAwaiter().GetResult();
+        var line = File.ReadAllText(logPath);
+        Equal(false, line.Contains(directory, StringComparison.OrdinalIgnoreCase), "lifecycle logs must not contain full local paths");
+        Equal(false, line.Contains("private-model.gguf", StringComparison.OrdinalIgnoreCase), "lifecycle logs must not contain model file names");
+        Equal(true, line.Contains("\"model_path_sha256\"", StringComparison.Ordinal), "lifecycle logs must retain a path digest for correlation");
+    }
+    finally
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+}
+
+static void OwnedModelStopRecordsLifecycle()
+{
+    var directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"qwen-owned-stop-log-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    try
+    {
+        var port = FindUnusedPort();
+        var health = new ToggleHealthHandler();
+        var launcher = new CountingLauncher(() => health.Healthy = true);
+        var logPath = System.IO.Path.Combine(directory, "lifecycle.jsonl");
+        var options = new LocalModelOptions(
+            new Uri($"http://127.0.0.1:{port}/health"),
+            new Uri($"http://127.0.0.1:{port}/v1/chat/completions"),
+            System.IO.Path.Combine(directory, "server.exe"),
+            System.IO.Path.Combine(directory, "model.gguf"),
+            System.IO.Path.Combine(directory, "llama.log"),
+            port, "fixture", 4096, 0, false, false, 1, 30,
+            LifecycleLogFile: logPath, ConfigSha256: "stop-contract");
+        using var manager = new AsyncDisposableAdapter(new QwenServiceManager(options, launcher, new HttpClient(health)));
+        _ = manager.Value.EnsureAvailableAsync().GetAwaiter().GetResult();
+
+        manager.Value.StopServiceAsync().GetAwaiter().GetResult();
+
+        var records = File.ReadAllLines(logPath)
+            .Select(line => System.Text.Json.JsonDocument.Parse(line))
+            .ToArray();
+        try
+        {
+            var stop = records.Select(record => record.RootElement)
+                .SingleOrDefault(root => root.GetProperty("action").GetString() == "stop");
+            Equal(System.Text.Json.JsonValueKind.Object, stop.ValueKind,
+                "stopping a model owned by Qwen Local must append a stop lifecycle event");
+            Equal("user_exit_stop", stop.GetProperty("reason").GetString(),
+                "the owned stop event must retain the user-exit reason");
+            Equal(4242, stop.GetProperty("pid").GetInt32(),
+                "the owned stop event must retain the stopped process id");
+        }
+        finally
+        {
+            foreach (var record in records) record.Dispose();
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
 }
 
 

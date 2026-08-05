@@ -13,15 +13,19 @@ internal static class SelfTest
         Directory.CreateDirectory(paths.DiagnosticsRoot);
         var reportPath = System.IO.Path.Combine(paths.DiagnosticsRoot, "self-test.json");
         var started = DateTimeOffset.Now;
-        var before = ExactLlamaPids(paths.ServerExecutable);
+        var modelConfig = new ModelServiceConfigStore(paths.ProjectRoot, paths.ModelServiceConfigFile)
+            .LoadOrMigrate(paths.SettingsFile).Config;
+        var serverExecutable = modelConfig.ResolveServerExecutable(paths.ProjectRoot);
+        var before = ExactLlamaPids(serverExecutable);
         var checks = new Dictionary<string, object?>();
         Exception? failure = null;
         try
         {
-            var options = new LocalModelOptions(
-                new Uri("http://127.0.0.1:18135/health"),
-                new Uri("http://127.0.0.1:18135/v1/chat/completions"),
-                paths.ServerExecutable, paths.ModelFile, paths.ModelLogFile, 18135);
+            var options = modelConfig.ToLocalModelOptions(
+                paths.ProjectRoot,
+                paths.ModelLogFile,
+                paths.ModelStartLockFile,
+                paths.ModelLifecycleLogFile);
             await using var manager = new QwenServiceManager(options, new WindowsModelProcessLauncher());
             var availability = await manager.EnsureAvailableAsync();
             checks["model_reused"] = availability.Reused;
@@ -50,7 +54,7 @@ internal static class SelfTest
             checks["memos_probe_statement"] = memoryProbe.Statement;
             checks["memos_session_id"] = sessionId;
 
-            var after = ExactLlamaPids(paths.ServerExecutable);
+            var after = ExactLlamaPids(serverExecutable);
             checks["llama_pids_before"] = before;
             checks["llama_pids_after"] = after;
             checks["no_duplicate_model_process"] = SingleModelWasReused(before, after);
@@ -67,8 +71,8 @@ internal static class SelfTest
             ok = checks.TryGetValue("ok", out var okValue) && okValue is true,
             started_at = started,
             finished_at = DateTimeOffset.Now,
-            model = paths.ModelFile,
-            endpoint = "http://127.0.0.1:18135",
+            model = modelConfig.ModelAlias,
+            endpoint = $"http://{modelConfig.BindHost}:{modelConfig.Port}",
             checks,
             error = failure?.ToString(),
         };

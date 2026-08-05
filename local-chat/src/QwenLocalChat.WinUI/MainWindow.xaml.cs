@@ -41,8 +41,8 @@ public sealed partial class MainWindow : Window
         RootFrame.Navigate(typeof(MainPage));
     }
 
-    public void SetEndpointSubtitle(int port)
-        => AppTitleBar.Subtitle = $"LOCAL CORE  /  127.0.0.1:{port}";
+    public void SetEndpointSubtitle(string host, int port)
+        => AppTitleBar.Subtitle = $"LOCAL CORE  /  {host}:{port}";
 
     private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {

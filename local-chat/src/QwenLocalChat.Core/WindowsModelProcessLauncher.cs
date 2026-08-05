@@ -10,20 +10,13 @@ public static class ModelLaunchCommand
         {
             "--model", options.ModelFile,
             "--alias", options.ModelAlias,
-            "--host", "127.0.0.1",
+            "--host", options.BindHost,
             "--port", options.Port.ToString(),
             "--ctx-size", options.ContextSize.ToString(),
             "--n-gpu-layers", options.GpuLayers.ToString(),
             "--reasoning", options.ReasoningEnabled ? "on" : "off",
         };
         if (options.UseJinja) arguments.Add("--jinja");
-        // When thinking is on, cap default thought tokens so free-form answers keep room for body text.
-        // Per-request reasoning_budget (if supported) can still refine this.
-        if (options.ReasoningEnabled)
-        {
-            arguments.Add("--reasoning-budget");
-            arguments.Add("1536");
-        }
         arguments.Add("--parallel");
         arguments.Add(options.ParallelSlots.ToString());
         // Without unified KV, llama-server splits --ctx-size across slots

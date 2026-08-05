@@ -18,7 +18,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TitleBar x:Name="AppTitleBar" Title="Qwen Local" Subtitle="LOCAL CORE  /  127.0.0.1:18135">
+        <TitleBar x:Name="AppTitleBar" Title="Qwen Local" Subtitle="LOCAL CORE  /  加载配置">
             <TitleBar.IconSource>
                 <BitmapIconSource UriSource="ms-appx:///Assets/AppIconMark.png" ShowAsMonochrome="False" />
             </TitleBar.IconSource>

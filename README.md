@@ -5,19 +5,27 @@
 ## 各组件做什么
 
 - **MemOS 2.0.12**：保存对话轨迹，组织短期/长期/抽象记忆，并执行记忆演化。
-- **Qwen3.5-9B Uncensored HauhauCS Aggressive Q4_K_M**：本地理解对话，提取值得长期保存的事实、偏好和流程，完成归纳与评分。它由 `llama.cpp` 在 RTX 4070 Laptop GPU 上运行，默认关闭思考模式以避免结构化输出被思考内容占满。
+- **本地生成模型**：由 `runtime/model-service.json` 指定 GGUF、别名、上下文、GPU 层数、并发、思考模式和 Jinja 模板。MemOS 使用它完成记忆提取、归纳与评分。
 - **all-MiniLM-L6-v2**：把文本转换成 384 维向量，用来快速查找“意思相近但字面不同”的记忆。它不负责生成回答。
 - **MCP 适配器**：向 Codex 提供 `memos_recall`、`memos_remember`、`memos_health` 和 `memos_list_recent` 四个工具。
 
 ## 数据位置
 
 - MemOS 数据库：`D:\codex\experiments\memos-local-codex\runtime\data\memos.db`
-- 当前本地模型：`D:\codex\experiments\memos-local-codex\models\Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf`
-- 回滚模型（默认不启动）：`D:\codex\experiments\memos-local-codex\models\Qwen3-4B-Q4_K_M.gguf`
+- 共享模型配置：`D:\codex\experiments\memos-local-codex\runtime\model-service.json`
+- 配置示例：`D:\codex\experiments\memos-local-codex\runtime\model-service.example.json`
 - 向量模型缓存：`D:\codex\experiments\memos-local-codex\runtime\transformers-cache`
 - 本地模型诊断日志：`D:\codex\experiments\memos-local-codex\runtime\logs\llama-server.log`
 
-MemOS 文件日志和专用 LLM 日志均已禁用；遥测与 MemOS Hub 已禁用；本地模型服务只监听 `127.0.0.1:18135`。验收阶段产生的旧日志只含合成测试内容，不作为运行时依赖。
+MemOS 文件日志和专用 LLM 日志均已禁用；遥测与 MemOS Hub 已禁用。共享配置只允许回环地址，当前实例使用 `127.0.0.1:18135`。验收阶段产生的旧日志只含合成测试内容，不作为运行时依赖。
+
+## 共享模型服务
+
+Qwen Local 和 MemOS 读取同一份 `runtime/model-service.json`。两端启动前会重新读取配置，并通过 `runtime/locks/model-service-start.lock` 协调，避免并发启动多个模型进程。锁文件包含 PID、客户端身份和配置摘要；只有死 PID 且服务不健康时才会恢复残留锁。
+
+`auto_start_on_demand` 控制 MemOS 的真实 `recall` / `remember` 调用能否在冷状态启动模型。`memos_health` 和 `memos_list_recent` 保持只读，不会启动模型。Qwen Local 设置页的“记忆调用按需启动模型”开关会更新该字段。
+
+模型启动、复用、停止和失败事件记录在 `runtime/logs/model-service-lifecycle.jsonl`。日志保存路径哈希和配置摘要，不记录提示词或记忆正文。
 
 ## 使用
 
@@ -40,7 +48,8 @@ MemOS 文件日志和专用 LLM 日志均已禁用；遥测与 MemOS Hub 已禁�
 ```powershell
 cd 'D:\codex\experiments\memos-local-codex'
 npm run audit:prod
-npm run smoke
+npm test
+npm run accept:lifecycle:read-only
 ```
 
-`npm run smoke` 会启动本地模型，写入一条验收记忆，再用不同措辞进行语义召回。首次加载模型需要一些时间和显存。
+`accept:lifecycle:read-only` 要求模型先处于停止状态，并验证健康检查和最近记忆列表不会启动服务。`accept:lifecycle:recall` 会执行真实召回，验证共享配置、进程身份和按需启动。`accept:lifecycle:remember` 在系统临时目录建立隔离的 MemOS 数据库，执行真实 remember 和同义 recall，关闭测试 MCP 后删除整个临时目录。`npm run smoke` 会写入当前运行库，只在需要持久化读写验收时使用。

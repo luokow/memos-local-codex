@@ -1,6 +1,6 @@
 # Qwen 本地聊天
 
-双击桌面的 `Qwen Local.lnk` 即可打开 WinUI 3 本地聊天窗口。首次注册或重新构建后，可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\create-desktop-shortcut.ps1` 重建入口。程序使用 D 盘现有的 Qwen3.5-9B、llama.cpp 和 MemOS，不调用云端 API。
+双击桌面的 `Qwen Local.lnk` 即可打开 WinUI 3 本地聊天窗口。首次注册或重新构建后，可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\create-desktop-shortcut.ps1` 重建入口。程序使用父目录 `runtime\model-service.json` 指定的本地 GGUF、llama.cpp 和 MemOS，所有请求保持在本机。
 
 ## 界面
 
@@ -18,9 +18,10 @@
 
 ## 模型生命周期
 
-- `127.0.0.1:18135` 健康时直接复用，不重复加载模型。
-- 服务未运行时，程序从父目录启动 Qwen3.5-9B，最多等待 120 秒。
+- 共享配置指定的回环端口健康且进程身份匹配时，程序直接复用服务。
+- 服务未运行时，程序按共享配置启动模型，启动等待时间由 `startup_timeout_seconds` 控制。
 - 如果模型由本窗口启动，关闭窗口时可选择停止模型或保持后台运行。
+- MemOS 的真实记忆调用可按设置启动共享模型；健康检查和列表查询保持只读。
 - 程序不创建 Windows 服务、计划任务或开机启动项。
 
 ## 本地数据

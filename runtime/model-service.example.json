@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "bind_host": "127.0.0.1",
+  "port": 18135,
+  "server_executable": "llama\\bin\\llama-server.exe",
+  "model_path": "models\\your-model.gguf",
+  "model_alias": "local-model",
+  "context_size": 8192,
+  "gpu_layers": 99,
+  "parallel_slots": 1,
+  "reasoning_enabled": true,
+  "use_jinja": true,
+  "startup_timeout_seconds": 180,
+  "auto_start_on_demand": true
+}

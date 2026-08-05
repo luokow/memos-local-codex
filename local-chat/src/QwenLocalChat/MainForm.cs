@@ -14,6 +14,7 @@ internal sealed class MainForm : Form
 
     private readonly AppPaths _paths;
     private readonly SettingsStore _settingsStore;
+    private readonly ModelServiceConfig _modelConfig;
     private readonly QwenServiceManager _modelManager;
     private readonly QwenChatClient _chatClient;
     private readonly MemoryWriteQueue _memoryQueue = new();
@@ -48,13 +49,13 @@ internal sealed class MainForm : Form
     {
         _paths = paths;
         _settingsStore = new SettingsStore(paths.SettingsFile);
-        var modelOptions = new LocalModelOptions(
-            new Uri("http://127.0.0.1:18135/health"),
-            new Uri("http://127.0.0.1:18135/v1/chat/completions"),
-            paths.ServerExecutable,
-            paths.ModelFile,
+        _modelConfig = new ModelServiceConfigStore(paths.ProjectRoot, paths.ModelServiceConfigFile)
+            .LoadOrMigrate(paths.SettingsFile).Config;
+        var modelOptions = _modelConfig.ToLocalModelOptions(
+            paths.ProjectRoot,
             paths.ModelLogFile,
-            18135);
+            paths.ModelStartLockFile,
+            paths.ModelLifecycleLogFile);
         _modelManager = new QwenServiceManager(modelOptions, new WindowsModelProcessLauncher());
         _chatClient = new QwenChatClient(modelOptions.ChatCompletionsUri);
         _chatLog = NewLog();
@@ -183,7 +184,7 @@ internal sealed class MainForm : Form
         }, 1, 0);
         brand.Controls.Add(new Label
         {
-            Text = "LOCAL CORE  /  127.0.0.1:18135",
+            Text = $"LOCAL CORE  /  {_modelConfig.BindHost}:{_modelConfig.Port}",
             Dock = DockStyle.Fill,
             AutoEllipsis = true,
             TextAlign = ContentAlignment.TopLeft,
@@ -201,7 +202,7 @@ internal sealed class MainForm : Form
             Margin = Padding.Empty,
             Padding = new Padding(0, 8, 0, 0),
         };
-        ConfigureStatus(_qwenStatus, "— 9B 启动中", Warning);
+        ConfigureStatus(_qwenStatus, "— 模型启动中", Warning);
         ConfigureStatus(_memosStatus, "○ 记忆关闭", Muted);
         ConfigureStatus(_logStatus, "○ 日志关闭", Muted);
         statuses.Controls.AddRange([_logStatus, _memosStatus, _qwenStatus]);
@@ -236,7 +237,7 @@ internal sealed class MainForm : Form
             Margin = new Padding(0, 5, 0, 10),
         };
         transcriptShell.Controls.Add(_transcript);
-        AppendSystem("正在检查本地 Qwen3.5-9B 服务；长期记忆和磁盘日志默认关闭。");
+        AppendSystem("正在检查本地模型服务；长期记忆和磁盘日志默认关闭。");
 
         _input.Dock = DockStyle.Fill;
         _input.Multiline = true;
@@ -447,15 +448,15 @@ internal sealed class MainForm : Form
         try
         {
             var availability = await _modelManager.EnsureAvailableAsync();
-            _qwenStatus.Text = availability.Reused ? "● 9B 已复用" : "● 9B 已启动";
+            _qwenStatus.Text = availability.Reused ? "● 模型已复用" : "● 模型已启动";
             _qwenStatus.ForeColor = Good;
-            SetNotice("模型只监听 127.0.0.1:18135。", Muted);
-            AppendSystem(availability.Reused ? "已复用当前 Qwen3.5-9B 服务，可以开始对话。" : "Qwen3.5-9B 已由本窗口启动，可以开始对话。");
+            SetNotice($"模型只监听 {_modelConfig.BindHost}:{_modelConfig.Port}。", Muted);
+            AppendSystem(availability.Reused ? "已复用当前本地模型服务，可以开始对话。" : "本地模型服务已由本窗口启动，可以开始对话。");
             _input.Focus();
         }
         catch (Exception error)
         {
-            _qwenStatus.Text = "× 9B 不可用";
+            _qwenStatus.Text = "× 模型不可用";
             _qwenStatus.ForeColor = Error;
             SetNotice($"模型启动失败：{error.Message}", Error);
         }
@@ -490,10 +491,10 @@ internal sealed class MainForm : Form
         SetBusy(true);
         try
         {
-            _qwenStatus.Text = "— 9B 检查中";
+            _qwenStatus.Text = "— 模型检查中";
             _qwenStatus.ForeColor = Warning;
             _ = await _modelManager.EnsureAvailableAsync();
-            _qwenStatus.Text = _modelManager.OwnsModel ? "● 9B 已启动" : "● 9B 已复用";
+            _qwenStatus.Text = _modelManager.OwnsModel ? "● 模型已启动" : "● 模型已复用";
             _qwenStatus.ForeColor = Good;
 
             string? memoryContext = null;
@@ -721,7 +722,7 @@ internal sealed class MainForm : Form
             {
                 var choice = ChoiceDialog.ShowDialog(this, "模型由本窗口启动", "关闭聊天窗口后，是否停止本窗口启动的 Qwen 模型？", "停止模型并退出", "保持模型后台运行");
                 if (choice == ThreeWayChoice.Cancel) return;
-                if (choice == ThreeWayChoice.First) await _modelManager.StopOwnedAsync();
+                if (choice == ThreeWayChoice.First) await _modelManager.StopOwnedAsync("user_exit_stop");
             }
 
             await DisposeMemosAsync();

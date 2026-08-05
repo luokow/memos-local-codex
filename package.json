@@ -6,6 +6,10 @@
   "scripts": {
     "audit:prod": "npm audit --omit=dev",
     "mcp": "node scripts/mcp-server.mjs",
+    "test": "node --test scripts/*.test.mjs",
+    "accept:lifecycle:read-only": "node scripts/lifecycle-acceptance.mjs read-only",
+    "accept:lifecycle:recall": "node scripts/lifecycle-acceptance.mjs recall",
+    "accept:lifecycle:remember": "node scripts/lifecycle-acceptance.mjs remember-isolated",
     "smoke": "node scripts/smoke-test.mjs",
     "verify:embedding": "node scripts/verify-offline-embedding.mjs"
   },

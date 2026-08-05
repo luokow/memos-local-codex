@@ -43,7 +43,6 @@ public sealed class MemosStdioClient(string nodeExecutable, string serverScript,
                 StandardErrorEncoding = new UTF8Encoding(false),
             };
             start.ArgumentList.Add(serverScript);
-            start.Environment["MEMOS_REUSE_LLM_ONLY"] = "1";
             start.Environment["NO_PROXY"] = "127.0.0.1,localhost";
             foreach (var key in new[] { "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "MEMOS_API_KEY" })
                 start.Environment.Remove(key);
