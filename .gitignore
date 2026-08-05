@@ -1,0 +1,16 @@
+node_modules/
+runtime/*
+!runtime/model-service.example.json
+artifacts/
+llama/
+ollama/
+models/
+*.log
+local-chat/data/
+local-chat/diagnostics/
+local-chat/QwenLocalChat.exe
+local-chat/QwenLocalChat.lnk
+**/bin/
+**/obj/
+**/AppPackages/
+**/TestResults/

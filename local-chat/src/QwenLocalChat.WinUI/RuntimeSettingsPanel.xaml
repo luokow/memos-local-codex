@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="QwenLocalChat_WinUI.RuntimeSettingsPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <Style x:Key="CompactSettingsNumberBoxStyle" TargetType="NumberBox">
+            <Setter Property="Width" Value="136" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+        <Style x:Key="CompactSettingsTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Width" Value="360" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid x:Name="SettingsRoot">
+        <!-- Dimmed scrim behind the drawer -->
+        <Rectangle x:Name="Scrim" Fill="#CC000000" Opacity="0" IsHitTestVisible="False" />
+
+        <!-- Soft left shadow strip so the drawer lifts off the chat surface -->
+        <Rectangle x:Name="ShadowStrip" Width="24" HorizontalAlignment="Right" Margin="0,0,500,0" IsHitTestVisible="False" Opacity="0">
+            <Rectangle.Fill>
+                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                    <GradientStop Offset="0" Color="#00000000" />
+                    <GradientStop Offset="1" Color="#88000000" />
+                </LinearGradientBrush>
+            </Rectangle.Fill>
+        </Rectangle>
+
+        <Border
+            x:Name="PanelShell"
+            Width="500"
+            HorizontalAlignment="Right"
+            Background="{StaticResource RaisedBrush}"
+            BorderBrush="{StaticResource StrongBorderBrush}"
+            BorderThickness="1,0,0,0">
+            <Grid>
+                <!-- Cool accent edge -->
+                <Rectangle Width="3" HorizontalAlignment="Left" VerticalAlignment="Stretch">
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                            <GradientStop Offset="0" Color="#66D6DCE5" />
+                            <GradientStop Offset="0.45" Color="#B3A8C0D8" />
+                            <GradientStop Offset="1" Color="#3399AABB" />
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+
+                <Grid Padding="16,12,14,12" Margin="3,0,0,0" RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel Spacing="10">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="模型设置" Style="{StaticResource SettingsPageTitleStyle}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" AutomationProperties.AutomationId="CloseSettingsButton" AutomationProperties.Name="关闭设置" Content="关闭" Click="CloseButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="关闭面板；若有未保存修改会先确认" VerticalAlignment="Top" />
+                    </Grid>
+                    <!-- Short glossary only; each section card already says when it takes effect. -->
+                    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12,10">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="保存后何时生效" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
+                            <TextBlock Text="点「保存」先写入磁盘。下方每个分区标题旁会写明生效时机，含义如下：" Style="{StaticResource SettingsSectionHintStyle}" />
+                            <Grid ColumnSpacing="10" RowSpacing="6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Border Background="#223A4A62" CornerRadius="4" Padding="8,3" VerticalAlignment="Center" MinWidth="52">
+                                    <TextBlock Text="即时" FontFamily="Microsoft YaHei UI" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Column="1" Text="保存后，下一句对话就用新参数。" Style="{StaticResource SettingsSectionHintStyle}" VerticalAlignment="Center" />
+                                <Border Grid.Row="1" Background="#334A3A22" CornerRadius="4" Padding="8,3" VerticalAlignment="Center" MinWidth="52">
+                                    <TextBlock Text="需重启" FontFamily="Microsoft YaHei UI" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Text="要先停止模型再打开软件，新参数才会进模型进程。" Style="{StaticResource SettingsSectionHintStyle}" VerticalAlignment="Center" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Padding="0,2,6,8" Spacing="12">
+                        <!-- Each settings group is a bordered card so section boundaries read at a glance. -->
+                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="生成" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="即时生效 · 下一句对话" Style="{StaticResource SettingsSectionHintStyle}" />
+                                </StackPanel>
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <Grid ColumnSpacing="12" RowSpacing="10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <NumberBox x:Name="MaxOutputTokensBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="MaxOutputTokensSetting" Header="最大输出 Token" Minimum="128" Maximum="28672" SmallChange="256" LargeChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="单次最多生成多少 token。默认 4096；须为上下文至少留 512。超时过短时请求会自动按输出量放宽。" />
+                                    <!-- SmallChange/LargeChange/NumberFormatter for 0.1 steps are set in code-behind; XAML double literals for 0.1 are unreliable on WinUI NumberBox. -->
+                                    <NumberBox x:Name="TemperatureBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="1" AutomationProperties.AutomationId="TemperatureSetting" Header="温度" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="越高越发散。长文可试 0.5～0.7" />
+                                    <NumberBox x:Name="RequestTimeoutBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="1" AutomationProperties.AutomationId="RequestTimeoutSetting" Header="请求超时（秒）" Minimum="30" Maximum="1800" SmallChange="30" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 900。若小于「输出÷20+60」保存会提示；发送时也会自动兜底。" />
+                                    <ToggleSwitch x:Name="StreamResponsesToggle" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="StreamResponsesSetting" Header="流式输出" OnContent="开启" OffContent="关闭" VerticalAlignment="Bottom" />
+                                    <!-- Anti-repetition knobs stay in place; tooltips only — no extra chrome. -->
+                                    <NumberBox x:Name="FrequencyPenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="2" AutomationProperties.AutomationId="FrequencyPenaltySetting" Header="频率惩罚" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）。复读严重时可试 0.3～0.5，过高易词串散乱" />
+                                    <NumberBox x:Name="PresencePenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="PresencePenaltySetting" Header="存在惩罚" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）" />
+                                    <NumberBox x:Name="RepeatPenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="3" AutomationProperties.AutomationId="RepeatPenaltySetting" Header="重复惩罚" Minimum="1" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 1.0（关闭）。复读时可试 1.08～1.15" />
+                                    <NumberBox x:Name="DryMultiplierBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="3" Grid.Column="1" AutomationProperties.AutomationId="DryMultiplierSetting" Header="DRY 抗重复" Minimum="0" Maximum="5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）。长程复读时可试 0.8～1.2" />
+                                    <NumberBox x:Name="RepeatLastNBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="4" AutomationProperties.AutomationId="RepeatLastNSetting" Header="重复检测窗口" Minimum="0" Maximum="2048" SmallChange="32" LargeChange="128" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 64。开启重复惩罚时才有意义" />
+                                    <ToggleSwitch x:Name="ClientRepetitionGuardToggle" Grid.Row="4" Grid.Column="1" AutomationProperties.AutomationId="ClientRepetitionGuardSetting" Header="输出去重裁尾" OnContent="开启" OffContent="关闭" VerticalAlignment="Bottom" ToolTipService.ToolTip="默认关闭。开启后客户端会裁段落/口号复读，并可能提前停流；误判会让长文变短变乱" />
+                                    <ToggleSwitch x:Name="AutoTightenOutputToggle" Grid.Row="5" AutomationProperties.AutomationId="AutoTightenOutputSetting" Header="按目标字数收紧输出" OnContent="开启" OffContent="关闭" VerticalAlignment="Bottom" ToolTipService.ToolTip="识别「约4000字」等提示，把本轮 max_tokens 收到接近目标；默认关闭" />
+                                    <ToggleSwitch x:Name="SegmentedLongFormToggle" Grid.Row="5" Grid.Column="1" AutomationProperties.AutomationId="SegmentedLongFormSetting" Header="长文分段写作" OnContent="开启" OffContent="关闭" VerticalAlignment="Bottom" ToolTipService.ToolTip="约≥2000字时拆成多段；默认关闭" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="会话" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="即时生效 · 无需重启模型" Style="{StaticResource SettingsSectionHintStyle}" />
+                                </StackPanel>
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <ComboBox
+                                    x:Name="SessionSortModeBox"
+                                    AutomationProperties.AutomationId="SessionSortModeSetting"
+                                    Header="列表排序"
+                                    HorizontalAlignment="Stretch"
+                                    MinWidth="200"
+                                    SelectedIndex="0"
+                                    ToolTipService.ToolTip="创建时间：新建在上且聊天时不跳位；最近更新：刚聊过的会话排到最前">
+                                    <ComboBoxItem Content="按创建时间（新会话在上）" Tag="created" />
+                                    <ComboBoxItem Content="按最近更新（刚聊过的在上）" Tag="updated" />
+                                </ComboBox>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="上下文与记忆" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="窗口/GPU 相关需重启；轮数与召回即时" Style="{StaticResource SettingsSectionHintStyle}" />
+                                </StackPanel>
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <NumberBox x:Name="ContextSizeBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="ContextSizeSetting" Header="上下文窗口" Minimum="2048" Maximum="32768" SmallChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="本机 9B Q4 + 8GB 显存实测可开 32768；需重启模型" />
+                                    <NumberBox x:Name="MaxHistoryRoundsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="1" AutomationProperties.AutomationId="MaxHistoryRoundsSetting" Header="历史轮数" Minimum="1" Maximum="100" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="参与上下文的最近完整问答轮数；默认 40" />
+                                    <NumberBox x:Name="MemosTopKBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="2" AutomationProperties.AutomationId="MemosTopKSetting" Header="MemOS 召回" Minimum="1" Maximum="20" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                </Grid>
+                                <Border Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="主窗口开关（只读）" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
+                                        <TextBlock x:Name="MemosStatusReadonlyText" AutomationProperties.AutomationId="MemosStatusReadonlyText" Text="MemOS 长期记忆：关闭" Style="{StaticResource SettingsSectionHintStyle}" />
+                                        <TextBlock x:Name="LogStatusReadonlyText" AutomationProperties.AutomationId="LogStatusReadonlyText" Text="聊天日志：关闭" Style="{StaticResource SettingsSectionHintStyle}" />
+                                        <TextBlock Text="请在主窗口底部切换；此处仅作状态对照。" Style="{StaticResource SettingsSectionHintStyle}" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="模型启动" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="需停止模型后重开。并发&gt;1 时用共享上下文池：只开一路可尽量用满窗口，多路同时生成才分摊" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <Grid ColumnSpacing="12" RowSpacing="10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <NumberBox x:Name="GpuLayersBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="GpuLayersSetting" Header="GPU 层" Minimum="0" Maximum="999" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <NumberBox x:Name="ParallelSlotsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="1" AutomationProperties.AutomationId="ParallelSlotsSetting" Header="并发槽位" Minimum="1" Maximum="8" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="可同时生成的会话数。启用共享 KV：平时只跑一路时尽量用满「上下文窗口」；多路同时生成时才共享同一池，无需为并发永久切短单路窗口。" />
+                                    <NumberBox x:Name="StartupTimeoutBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="2" AutomationProperties.AutomationId="StartupTimeoutSetting" Header="启动等待（秒）" Minimum="30" Maximum="600" SmallChange="30" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <ToggleSwitch x:Name="ReasoningToggle" Grid.Row="1" AutomationProperties.AutomationId="ReasoningSetting" Header="思考模式" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="开启后会限制思考长度，把更多额度留给正文；长文写作可关" />
+                                    <ToggleSwitch x:Name="JinjaToggle" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="JinjaSetting" Header="Jinja 模板" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="用模型自带对话模板，建议保持开启" />
+                                </Grid>
+                                <TextBox x:Name="ModelAliasBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="ModelAliasSetting" Header="模型别名" />
+                                <TextBox x:Name="ModelPathBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="ModelPathSetting" Header="模型文件（绝对路径或相对项目根）" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="本地服务" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="端口变更需重启模型" Style="{StaticResource SettingsSectionHintStyle}" />
+                                </StackPanel>
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
+                                    <NumberBox x:Name="PortBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="PortSetting" Header="端口" Minimum="1024" Maximum="65535" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <Border Grid.Column="1" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8" VerticalAlignment="Top">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="固定安全边界" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
+                                            <TextBlock Text="仅监听 127.0.0.1；禁用系统代理；MemOS 只复用现有模型；不向子进程传递云 API 密钥。" Style="{StaticResource SettingsSectionHintStyle}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <InfoBar x:Name="ValidationInfo" AutomationProperties.AutomationId="SettingsValidationInfo" IsOpen="False" IsClosable="False" Severity="Error" />
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Footer actions and discard confirm share one row so a hidden confirm bar cannot reserve blank space. -->
+                <Grid Grid.Row="2" MinHeight="44">
+                    <Grid x:Name="FooterActionsBar" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" HorizontalAlignment="Left" AutomationProperties.AutomationId="ResetSettingsButton" AutomationProperties.Name="恢复默认值" Content="恢复默认值" Click="ResetButton_Click" Style="{StaticResource SecondaryButtonStyle}" ToolTipService.ToolTip="仅重填表单默认值，需再点保存才会写入" />
+                        <Button Grid.Column="1" AutomationProperties.AutomationId="SaveSettingsButton" AutomationProperties.Name="保存设置" Content="保存" Click="SaveButton_Click" Style="{StaticResource PrimaryButtonStyle}" />
+                    </Grid>
+                    <Border x:Name="DiscardConfirmBar" AutomationProperties.AutomationId="SettingsDiscardConfirmBar" Height="0" Opacity="0" IsHitTestVisible="False" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="10">
+                        <Grid ColumnSpacing="8" Margin="12,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="有未保存的修改，关闭将丢弃本次改动。" FontFamily="Microsoft YaHei UI" FontSize="13" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}" />
+                            <Button x:Name="KeepEditingButton" Grid.Column="1" AutomationProperties.AutomationId="KeepEditingSettingsButton" AutomationProperties.Name="继续编辑设置" Content="继续编辑" Click="KeepEditingButton_Click" Style="{StaticResource SecondaryButtonStyle}" MinWidth="96" IsEnabled="False" />
+                            <Button x:Name="DiscardAndCloseButton" Grid.Column="2" AutomationProperties.AutomationId="DiscardSettingsButton" AutomationProperties.Name="放弃并关闭设置" Content="放弃并关闭" Click="DiscardAndCloseButton_Click" Style="{StaticResource SecondaryButtonStyle}" MinWidth="112" IsEnabled="False" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "QwenLocalChat.WinUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "QwenLocalChat.WinUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

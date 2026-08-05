@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">本地聊天应用图标</title>
+  <desc id="desc">黑色圆角方形中的白色对话气泡和三个消息点</desc>
+  <rect x="10" y="10" width="236" height="236" rx="52" fill="#080809" stroke="#f1f1ee" stroke-width="6"/>
+  <path d="M61 66h134c19 0 34 15 34 34v65c0 19-15 34-34 34h-61l-42 32 9-32H61c-19 0-34-15-34-34v-65c0-19 15-34 34-34Z" fill="#f1f1ee"/>
+  <circle cx="89" cy="133" r="10" fill="#111112"/>
+  <circle cx="128" cy="133" r="10" fill="#111112"/>
+  <circle cx="167" cy="133" r="10" fill="#111112"/>
+</svg>

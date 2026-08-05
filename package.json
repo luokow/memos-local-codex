@@ -1,0 +1,20 @@
+{
+  "name": "memos-local-codex",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "audit:prod": "npm audit --omit=dev",
+    "mcp": "node scripts/mcp-server.mjs",
+    "smoke": "node scripts/smoke-test.mjs",
+    "verify:embedding": "node scripts/verify-offline-embedding.mjs"
+  },
+  "dependencies": {
+    "@memtensor/memos-local-plugin": "file:artifacts/memos-local-plugin-2.0.12.tgz",
+    "@modelcontextprotocol/sdk": "1.30.0"
+  },
+  "overrides": {
+    "sharp": "0.35.0",
+    "uuid": "11.1.1"
+  }
+}
