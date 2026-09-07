@@ -1,0 +1,96 @@
+namespace QwenLocalChat.Core;
+
+public static class HanhuaCommand
+{
+    public const string MitRootEnv = "HANHUA_MIT_ROOT";
+
+    public static string? Validate(LocalChatSettings settings, HanhuaKind kind)
+    {
+        if (string.IsNullOrWhiteSpace(settings.HanhuaPackRoot) || string.IsNullOrWhiteSpace(settings.HanhuaPythonExe))
+            return "请先在设置里填写汉化工具包和 Python 路径。";
+        if (!File.Exists(settings.HanhuaPythonExe))
+            return "设置里的 Python 可执行文件不存在。";
+        if (!Directory.Exists(settings.HanhuaPackRoot))
+            return "设置里的汉化工具包目录不存在。";
+        var tools = Path.Combine(settings.HanhuaPackRoot, "tools");
+        if (!File.Exists(Path.Combine(tools, "one_click_rm.py")))
+            return "汉化工具包缺少 tools/one_click_rm.py。";
+        if (kind == HanhuaKind.Image)
+        {
+            if (string.IsNullOrWhiteSpace(settings.HanhuaMitRoot))
+                return "图片汉化需要在设置里填写 manga-image-translator 目录。";
+            if (!Directory.Exists(settings.HanhuaMitRoot))
+                return "设置里的 manga-image-translator 目录不存在。";
+            if (!File.Exists(Path.Combine(tools, "ocr_extract_local.py"))
+                || !File.Exists(Path.Combine(tools, "fill_ocr_local.py"))
+                || !File.Exists(Path.Combine(tools, "typeset_ocr_local.py")))
+                return "汉化工具包缺少图片脚本。";
+        }
+        return null;
+    }
+
+    public static string ImageWorkPath(string packRoot, string jobId)
+        => Path.Combine(packRoot, "work", "_local_ai", jobId);
+
+    public static HanhuaLaunch Game(LocalChatSettings settings, HanhuaEngine engine, string gamePath)
+        => Python(
+            settings,
+            "one_click_rm.py",
+            engine == HanhuaEngine.LocalQwen
+                ? ["--local", "--progress-jsonl", gamePath]
+                : ["--progress-jsonl", gamePath]);
+
+    public static HanhuaLaunch ImageOcr(LocalChatSettings settings, string sourcePath, string workPath)
+        => Python(settings, "ocr_extract_local.py", ["--progress-jsonl", sourcePath, workPath], includeMit: true);
+
+    public static HanhuaLaunch ImageFill(LocalChatSettings settings, HanhuaEngine engine, string workPath)
+        => Python(
+            settings,
+            "fill_ocr_local.py",
+            engine == HanhuaEngine.Aliyun
+                ? ["--mt", "--progress-jsonl", workPath]
+                : ["--progress-jsonl", workPath]);
+
+    public static HanhuaLaunch ImageTypeset(LocalChatSettings settings, string workPath)
+        => Python(settings, "typeset_ocr_local.py", ["--progress-jsonl", workPath], includeMit: true);
+
+    public static HanhuaGpuNeed GpuNeed(HanhuaKind kind, HanhuaEngine engine, HanhuaPhase phase)
+    {
+        if (kind == HanhuaKind.Game)
+            return engine == HanhuaEngine.LocalQwen ? HanhuaGpuNeed.Qwen : HanhuaGpuNeed.None;
+        return phase switch
+        {
+            HanhuaPhase.Ocr or HanhuaPhase.Typeset => HanhuaGpuNeed.Mit,
+            HanhuaPhase.Fill => engine == HanhuaEngine.LocalQwen ? HanhuaGpuNeed.Qwen : HanhuaGpuNeed.None,
+            _ => HanhuaGpuNeed.None,
+        };
+    }
+
+    public static IReadOnlyList<HanhuaPhase> Phases(HanhuaKind kind)
+        => kind == HanhuaKind.Game
+            ? [HanhuaPhase.Copy, HanhuaPhase.Extract, HanhuaPhase.Translate, HanhuaPhase.Inject]
+            : [HanhuaPhase.Ocr, HanhuaPhase.Fill, HanhuaPhase.Typeset];
+
+    private static HanhuaLaunch Python(
+        LocalChatSettings settings,
+        string scriptName,
+        IReadOnlyList<string> scriptArgs,
+        bool includeMit = false)
+    {
+        var pack = Path.GetFullPath(settings.HanhuaPackRoot);
+        var args = new List<string> { "-u", Path.Combine(pack, "tools", scriptName) };
+        args.AddRange(scriptArgs);
+        var env = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["PYTHONUTF8"] = "1",
+            ["PYTHONIOENCODING"] = "utf-8",
+        };
+        if (includeMit && !string.IsNullOrWhiteSpace(settings.HanhuaMitRoot))
+            env[MitRootEnv] = Path.GetFullPath(settings.HanhuaMitRoot);
+        return new HanhuaLaunch(
+            Path.GetFullPath(settings.HanhuaPythonExe),
+            args,
+            pack,
+            env);
+    }
+}
