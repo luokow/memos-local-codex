@@ -1,11 +1,11 @@
 # Local AI 汉化工作区
 
 日期：2026-09-08  
-状态：已与用户确认方向；实现前以本文为准。
+状态：已与用户确认方向，并批准本机 Qwen / 阿里云引擎开关；实现前以本文为准。
 
 ## 目标
 
-在 Local AI 顶部增加第三个工作区「汉化」，让本机 Qwen 对话模型承接已经跑通的游戏文本汉化和漫画图片填字/嵌字。Local AI 负责选目录、显存互斥、进度和打开结果。抽字、OCR、涂白、嵌字仍由现有 Python 流水线执行。
+在 Local AI 顶部增加第三个工作区「汉化」，调度已经跑通的游戏文本汉化和漫画图片填字/嵌字。汉化页默认走本机 Qwen 对话模型，也可在页内切到阿里云 qwen-mt。Local AI 负责选目录、选引擎、显存互斥、进度和打开结果。抽字、OCR、涂白、嵌字仍由现有 Python 流水线执行。
 
 硬约束：**聊天、视频、阿里云一键汉化、MTool 自配与必应、18765 适配器的原有行为不得改变。** 汉化是新增工作区，不是改写现有两条模式。
 
@@ -13,7 +13,7 @@
 
 - 不把汉化任务丢进聊天气泡或聊天附件。
 - 不在 C# 里重写 RPG Maker 抽写回、manga-image-translator、OCR、涂白。
-- 不把阿里云 qwen-mt、18765 适配进程、LinguaGacha 默认引擎、MTool 自配切到本地。
+- 不把阿里云 qwen-mt、18765 适配进程、LinguaGacha 默认引擎、MTool 自配的默认配置切到本地。汉化页的阿里云选项只调用现有 `translate_direct.py` / `one_click_rm.py` 无 `--local` 路径，不改那些默认。
 - 不自动启动、退出或提交 MTool；不清理自配通道已经落盘的译文。
 - 不在回复、日志、设置里打印接口密钥。
 - 不把 Unity / Ren'Py / WOLF / 加密 RPG Maker 纳入这一期。
@@ -46,10 +46,10 @@
 1. `MainPage.xaml` 的 `ModeSelector` 增加第三项，三路显示切换。
 2. `ModeSelector_SelectionChanged` 从「是否视频」改成三态；选中「聊天」时的可见性必须与改前「非视频」一致。
 3. `PrepareForVideoAsync` / 聊天发送入口增加「汉化任务占用中则拒绝」。
-4. `LocalChatSettings` 增加三个可空路径字段；缺省为空，旧设置文件缺键时行为与现在相同。
-5. 设置「本地服务」卡末尾追加汉化路径三字段；互斥开关文案改为说明聊天、视频、汉化三者互斥，JSON 键不变。
+4. `LocalChatSettings` 增加三个可空路径字段和 `hanhua_engine`；路径缺省为空，引擎缺省 `local`，旧设置文件缺键时其它字段与现在相同。
+5. 设置「本地服务」卡末尾追加汉化路径三字段；互斥开关文案改为说明聊天、视频、汉化三者互斥，JSON 键不变。引擎下拉在汉化页，不进设置抽屉。
 6. `docs/winui-ui-baseline.md` 与 `verify-winui-ui-baseline.ps1` 把模式工具栏从两项更新为三项。
-7. 内嵌汉化 Python 增加可选 `--progress-jsonl` 和新的抽字入口；默认不传该旗标时 stdout 仍可被人读，bat 行为不变。现有脚本的默认路径保持原样，仅在设置了 `HANHUA_MIT_ROOT` 时改用设置值。
+7. 内嵌汉化 Python 增加可选 `--progress-jsonl`、图片填字 `--mt`、和新的抽字入口；默认不传这些旗标时 stdout 仍可被人读，bat 行为不变。现有脚本的默认路径保持原样，仅在设置了 `HANHUA_MIT_ROOT` 时改用设置值。不把密钥写入 Local AI 设置、命令行或环境变量。
 
 ## 架构
 
@@ -57,11 +57,11 @@ Local AI 顶部为 `聊天 | 视频 | 汉化`。汉化页只调度，不自己�
 
 - WinUI：`HanhuaPanel` 负责选目录、进度、打开结果。
 - Core：`HanhuaJobStore` 写 `data/hanhua-jobs.json`；`HanhuaCommand` 只拼 Python 命令；`HanhuaProcessHost` 启进程、读进度、取消。
-- 显存：聊天生成、视频生成、汉化任务三选一。
-- Python（路径来自设置，不写死盘符）：游戏 `one_click_rm.py --local`；图片 `ocr_extract_local.py` → `fill_ocr_local.py` → `typeset_ocr_local.py`。
-- 翻字只打本机 `127.0.0.1:18135`。OCR/嵌字只打 manga-image-translator。
+- 显存：聊天生成、视频生成、汉化任务三选一。本机翻字需要 Qwen；阿里云翻字不启停 Qwen；OCR/嵌字仍要停 Qwen 与视频。
+- Python（路径来自设置，不写死盘符）：游戏 `one_click_rm.py`，本机加 `--local`，阿里云不加；图片 `ocr_extract_local.py` → `fill_ocr_local.py`（本机默认，阿里云加 `--mt`）→ `typeset_ocr_local.py`。
+- 本机翻字打 `127.0.0.1:18135`。阿里云翻字由 Python 读取现有 MTool 配置，C# 不经手密钥。OCR/嵌字只打 manga-image-translator。
 
-C# 不调用聊天补全接口做翻译。翻句仍由 Python `local_qwen.py` 打同一只本机服务，协议（system 加 user、思考关闭、保护游戏控制码）保持现网。Local AI 只保证该服务在翻字阶段健康，并在 OCR/嵌字阶段把它停掉。
+C# 不调用聊天补全接口做翻译，也不调用阿里云。翻句仍由 Python 执行：本机走 `local_qwen.py`（system 加 user、思考关闭、保护游戏控制码）；阿里云走现有 qwen-mt payload。Local AI 只在本机翻字阶段保证该服务健康，并在 OCR/嵌字阶段把它停掉。
 
 ## 组件
 
@@ -74,7 +74,7 @@ C# 不调用聊天补全接口做翻译。翻句仍由 Python `local_qwen.py` �
 输入卡：
 
 - 标题「汉化任务」
-- 右侧下拉：游戏文本 / 漫画图片（位置对标视频生成模式下拉）
+- 右侧两个下拉：种类（游戏文本 / 漫画图片）、引擎（本机 Qwen / 阿里云）。默认引擎是本机 Qwen。位置对标视频生成模式下拉。
 - 只读路径框加「选择目录」
 - 主按钮在正文行最右：空闲为「开始汉化」，运行中为「取消」
 
@@ -96,15 +96,17 @@ C# 不调用聊天补全接口做翻译。翻句仍由 Python `local_qwen.py` �
 
 `HanhuaKind`: `Game` | `Image`
 
+`HanhuaEngine`: `LocalQwen` | `Aliyun`。默认 `LocalQwen`。JSON 值为 `local` / `aliyun`。
+
 `HanhuaPhase`：游戏为 `Copy` → `Extract` → `Translate` → `Inject`；图片为 `Ocr` → `Fill` → `Typeset`。
 
 `HanhuaJobStatus`: `Queued` | `Running` | `Cancelling` | `Succeeded` | `Failed` | `Interrupted`
 
-`HanhuaJob` 字段：`Id`、`Kind`、`Phase`、`Status`、`SourcePath`、`WorkPath`、`OutputPath`、`Done`、`Total`、`Message`、`Error`、`StartedUtc`、`UpdatedUtc`
+`HanhuaJob` 字段：`Id`、`Kind`、`Engine`、`Phase`、`Status`、`SourcePath`、`WorkPath`、`OutputPath`、`Done`、`Total`、`Message`、`Error`、`StartedUtc`、`UpdatedUtc`
 
-`HanhuaJobStore`：原子写 `data/hanhua-jobs.json`。最多保留最近 20 条；正在跑或可续跑的一条始终保留。
+`HanhuaJobStore`：原子写 `data/hanhua-jobs.json`。最多保留最近 20 条；正在跑或可续跑的一条始终保留。续跑使用该任务记录的引擎，不改用户当前下拉，除非用户重新开始。
 
-`HanhuaCommand`：根据设置拼进程参数，不启动进程。游戏固定带 `--local`。不把云端密钥放进参数或环境变量。
+`HanhuaCommand`：根据设置和引擎拼进程参数，不启动进程。本机游戏带 `--local --progress-jsonl`；阿里云游戏只带 `--progress-jsonl`，不含 `--local`。本机填字不带 `--mt`；阿里云填字带 `--mt`。不把云端密钥放进参数或环境变量。
 
 `HanhuaProcessHost`：`python -u` 跑脚本，UTF-8，工作目录为汉化工具包根目录。取消即结束该进程树。不在 Python 里自己启停 llama-server。Local AI 把设置里的 MIT 目录写入环境变量 `HANHUA_MIT_ROOT`；脚本有该变量就用它，没有则沿用现有默认路径，保证双击 bat 的行为不变。
 
@@ -117,21 +119,28 @@ C# 不调用聊天补全接口做翻译。翻句仍由 Python `local_qwen.py` �
 | `hanhua_pack_root` | 内嵌汉化工具包根目录 | 空 |
 | `hanhua_python_exe` | Python 可执行文件 | 空 |
 | `hanhua_mit_root` | manga-image-translator 根目录 | 空 |
+| `hanhua_engine` | 汉化页引擎：`local` 或 `aliyun` | `local` |
 
-缺键或空字符串时：汉化页拒绝开始，状态行提示去设置里填路径。Core 不得写死固定盘符或当前用户主目录。本机可在设置里填现网路径。
+缺键或路径为空字符串时：汉化页拒绝开始，状态行提示去设置里填路径。`hanhua_engine` 缺键、空值或未知值一律当作 `local`。Core 不得写死固定盘符或当前用户主目录。本机可在设置里填现网路径。
 
-路径变更即时生效，不重启模型。
+路径和引擎变更即时生效，不重启模型。引擎下拉写回 `hanhua_engine`，不进设置抽屉。
 
-互斥开关键名仍为 `enforce_text_video_model_exclusivity`，默认开启，旧测试继续有效。开启时聊天生成、视频生成、汉化任务不能重叠：翻字前停视频，OCR/嵌字前停 Qwen 与视频。关闭时不自动卸另一模型，但仍不允许第二个任务在已有生成或汉化任务时启动。
+互斥开关键名仍为 `enforce_text_video_model_exclusivity`，默认开启，旧测试继续有效。开启时聊天生成、视频生成、汉化任务不能重叠。关闭时不自动卸另一模型，但仍不允许第二个任务在已有生成或汉化任务时启动。
+
+GPU 细则：
+
+- 本机游戏翻字、本机图片填字：先释放视频（互斥开时），再启动或复用 Qwen。
+- 阿里云游戏翻字、阿里云图片填字：不启停 Qwen；Qwen 正在聊天生成时仍拒绝开始汉化。
+- 图片 OCR / 嵌字：无论引擎，先停本窗口可停的 Qwen 与视频；停完后若文本口仍健康则拒绝。
 
 ## 数据流
 
 ### 游戏文本
 
 1. 用户选中含 `Game.exe` 的目录（可向上查找游戏根，规则与现有 `one_click_rm.find_game_root` 一致；其它引擎直接拒绝并说明）。
-2. 若互斥开启：聊天正在生成则拒绝开始，不静默杀掉聊天；然后释放视频。
-3. 启动或复用 Qwen。
-4. 运行 `one_click_rm.py --local --progress-jsonl` 加上游戏目录。
+2. 聊天正在生成则拒绝开始，不静默杀掉聊天。视频正在生成则拒绝开始。
+3. 本机 Qwen：互斥开启则先释放视频，再启动或复用 Qwen。阿里云：不启停 Qwen。
+4. 本机运行 `one_click_rm.py --local --progress-jsonl`；阿里云运行 `one_click_rm.py --progress-jsonl`（无 `--local`）。
 5. 成功后输出为带 `-cn` 后缀的副本；「打开结果」选中中文版启动脚本或游戏主程序。
 6. 失败或取消：已经写进译文表的句子保留；下次对同一源目录接着翻空行。
 
@@ -143,9 +152,9 @@ C# 不调用聊天补全接口做翻译。翻句仍由 Python `local_qwen.py` �
 
 阶段必须串行，由 C# 在阶段之间切换 GPU：
 
-1. 抽字：停 Qwen 与视频，跑 `ocr_extract_local.py`，写出空译文表和 `typeset_in`。
-2. 填字：启动 Qwen，确认健康检查（loopback 禁用系统代理），跑 `fill_ocr_local.py`。已填且不等于原文的键跳过。
-3. 嵌字：再停 Qwen，跑 `typeset_ocr_local.py`。MIT 保持 translator=none，用环境变量指向已填译文表，不让 MIT 自己调模型。
+1. 抽字：停 Qwen 与视频，跑 `ocr_extract_local.py --progress-jsonl`，写出空译文表和 `typeset_in`。
+2. 填字：本机启动 Qwen 并做健康检查（loopback 禁用系统代理），跑 `fill_ocr_local.py --progress-jsonl`。阿里云不启停 Qwen，跑 `fill_ocr_local.py --mt --progress-jsonl`。已填且不等于原文的键跳过。
+3. 嵌字：再停 Qwen，跑 `typeset_ocr_local.py --progress-jsonl`。MIT 保持 translator=none，用环境变量指向已填译文表，不让 MIT 自己调模型。
 
 游戏任务与图片任务不能并行。图片三阶段是同一个任务，取消停在当前阶段；续跑从该阶段重来（填字跳过已填）。
 
@@ -168,8 +177,8 @@ C# 不调用聊天补全接口做翻译。翻句仍由 Python `local_qwen.py` �
 | 情况 | 行为 |
 | --- | --- |
 | 路径未配置，或 Python / MIT / 脚本缺失 | 不启动进程；一行中文原因 |
-| Qwen 健康检查失败（含系统代理把回环打成 502） | 提示先启动文本模型；探测必须禁用代理 |
-| 翻字时视频仍占 GPU | 互斥开启则先释放视频；释放失败则拒绝开始 |
+| 本机翻字时 Qwen 健康检查失败（含系统代理把回环打成 502） | 提示先启动文本模型；探测必须禁用代理。阿里云翻字不走这条 |
+| 本机翻字时视频仍占 GPU | 互斥开启则先释放视频；释放失败则拒绝开始。阿里云翻字不要求释放 Qwen |
 | OCR/嵌字时本机文本口仍在听 | 先停本窗口可停的 Qwen；仍健康则拒绝 |
 | 聊天正在生成 | 拒绝开始汉化，不取消聊天 |
 | 汉化正在跑 | 拒绝发送聊天、拒绝开始视频 |
@@ -183,17 +192,19 @@ C# 不调用聊天补全接口做翻译。翻句仍由 Python `local_qwen.py` �
 
 Core（加入 `tests/QwenLocalChat.Tests/Program.cs` 的具名用例）：
 
-- 旧设置文件无汉化键时三个路径为空，其它字段与现在一致。
-- 填写汉化路径后往返磁盘，不影响互斥开关默认开启。
-- 游戏命令含 `--local` 与 `--progress-jsonl`，环境不含密钥。
-- 图片三阶段命令顺序与工作目录正确。
+- 旧设置文件无汉化键时三个路径为空、引擎为 `local`，其它字段与现在一致。
+- 填写汉化路径和 `aliyun` 引擎后往返磁盘，不影响互斥开关默认开启。
+- 本机游戏命令含 `--local` 与 `--progress-jsonl`；阿里云游戏命令含 `--progress-jsonl` 且不含 `--local`；环境都不含密钥。
+- 本机填字命令不含 `--mt`；阿里云填字命令含 `--mt`。图片三阶段命令顺序与工作目录正确。
 - JSONL 解析覆盖 progress / done / error / 非 JSON 行。
-- 汉化 Running 时不能开始视频、不能开始第二份汉化；视频 Running 时不能开始汉化。
+- 汉化 Running 时不能开始视频、不能开始第二份汉化、不能发送聊天；视频 Running 时不能开始汉化。
+- 本机填字需要 Qwen；阿里云填字与游戏翻字不把 Qwen 列入启动条件。OCR/嵌字无论引擎都要求停 Qwen。
 - 启动计划：汉化中断不得改变 text / video / none。
 
 Python（内嵌汉化现有离线测试增补，原有项保持）：
 
-- 带 `--progress-jsonl` 时输出可解析；缺省时云端 bat 仍无该旗标、仍无 `--local`。
+- 带 `--progress-jsonl` 时输出可解析；缺省时云端 bat 仍无该旗标、仍无 `--local`。本地游戏 bat 仍有 `--local`，仍无 `--progress-jsonl`。
+- `fill_ocr_local.py` 无旗标时仍是本机；`--mt` 走云端分流。点我用本地Qwen翻已抽出的图字.bat 不含 `--mt`。
 - 新抽字入口离线：缺目录返回非 0，不调用网络。
 - 云端与本地 payload 分流原断言不变。
 
