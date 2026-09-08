@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +66,133 @@ def mit_root() -> Path:
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+_HIRA_RE = re.compile(r"[\u3041-\u3096]")
+_OCR_BANG_RE = (
+    (re.compile(r"\s*1!+"), "！"),
+    (re.compile(r"\s*1！+"), "！"),
+    (re.compile(r"\s*1\?+"), "？"),
+    (re.compile(r"\s*1？+"), "？"),
+    (re.compile(r"1⁉"), "⁉"),
+)
+
+
+def list_image_files(folder: Path) -> list[Path]:
+    if not folder.is_dir():
+        return []
+    return sorted(
+        p
+        for p in folder.iterdir()
+        if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+    )
+
+
+def copy_images(src: Path, dest: Path) -> list[Path]:
+    dest.mkdir(parents=True, exist_ok=True)
+    copied: list[Path] = []
+    for img in list_image_files(src):
+        target = dest / img.name
+        shutil.copy2(img, target)
+        copied.append(target)
+    return copied
+
+
+def output_image_exists(folder: Path, stem: str) -> bool:
+    return any((folder / f"{stem}{ext}").is_file() for ext in IMAGE_SUFFIXES)
+
+
+def missing_ocr_pages(images: list[Path], ocr_dirs: list[Path]) -> list[Path]:
+    missing: list[Path] = []
+    for img in images:
+        if not any((folder / f"{img.stem}_ocr.json").is_file() for folder in ocr_dirs):
+            missing.append(img)
+    return missing
+
+
+def repair_ocr_bang(text: str) -> str:
+    """manga-ocr often reads ！ as 1. Keep real numbers like 第1話."""
+    out = str(text or "")
+    for pat, repl in _OCR_BANG_RE:
+        out = pat.sub(repl, out)
+    return out
+
+
+def has_hiragana(text: str) -> bool:
+    return bool(_HIRA_RE.search(text or ""))
+
+
+def translation_ok(src: str, dst: str) -> bool:
+    value = "" if dst is None else str(dst)
+    if not value.strip():
+        return False
+    if value == src or value.strip() == str(src).strip():
+        return not has_hiragana(src)
+    return True
+
+
+def store_translation(data: dict[str, str], raw: str, dst: str) -> None:
+    value = repair_ocr_bang("" if dst is None else str(dst))
+    data[raw] = value
+    cleaned = repair_ocr_bang(raw)
+    if cleaned != raw:
+        data[cleaned] = value
+
+
+def completed_image_pages(
+    pngs: list[Path],
+    *,
+    ocr_dirs: list[Path] | None = None,
+    output_dirs: list[Path] | None = None,
+) -> int:
+    """Count finished pages. Input images themselves do not count as done."""
+    done = 0
+    for png in pngs:
+        stem = png.stem
+        finished = False
+        for folder in ocr_dirs or []:
+            if (folder / f"{stem}_ocr.json").is_file():
+                finished = True
+                break
+        if not finished:
+            for folder in output_dirs or []:
+                if output_image_exists(folder, stem):
+                    finished = True
+                    break
+        if finished:
+            done += 1
+    return done
+
+
+def run_mit_with_page_progress(
+    cmd: list[str],
+    *,
+    cwd: str,
+    env: dict[str, str],
+    phase: str,
+    total: int,
+    count: Callable[[], int],
+    interval: float = 0.5,
+) -> int:
+    """Run MIT and emit jsonl whenever the on-disk page count increases."""
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env)
+    last = -1
+    total = max(0, int(total))
+    try:
+        while True:
+            done = min(total, max(0, int(count() or 0)))
+            if done != last:
+                last = done
+                emit("progress", phase, done=done, total=total, message=f"{done}/{total}")
+            if proc.poll() is not None:
+                break
+            time.sleep(interval)
+        done = min(total, max(0, int(count() or 0)))
+        if done != last:
+            emit("progress", phase, done=done, total=total, message=f"{done}/{total}")
+        return int(proc.returncode or 0)
+    except BaseException:
+        if proc.poll() is None:
+            proc.kill()
+        raise
 
 
 def isolate_image_folder(folder: Path, dest: Path) -> int:
@@ -92,6 +223,7 @@ GAME_SYSTEM = (
 IMAGE_SYSTEM = (
     "你是日文漫画对白翻译器。将日文译成简体中文。"
     "数组必须逐条 1:1。保留语气词、拟声词和 ♥ 等符号。"
+    "禁止把日文原样返回。对白必须译成简体中文；短拟声词可以保留片假名。"
     "占位符 @@RPGn@@ 必须原样保留。"
     "不要解释，不要注音。"
 )

@@ -18,7 +18,9 @@ public static class HanhuaProgress
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
                 return new("log", null, 0, 0, trimmed, null, 0, raw, false);
-            var type = ReadString(root, "type") ?? "progress";
+            var type = ReadString(root, "type");
+            if (type is not "progress" and not "phase" and not "done" and not "error")
+                return new("log", null, 0, 0, trimmed, null, 0, raw, false);
             return new(
                 type,
                 ReadString(root, "phase"),

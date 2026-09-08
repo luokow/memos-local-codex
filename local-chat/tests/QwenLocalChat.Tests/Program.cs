@@ -4157,6 +4157,9 @@ static void HanhuaProgressParsesJsonlAndPlainLines()
     Equal("error", error.Type, "error type");
     Equal("boom", error.Message, "error message");
 
+    var noise = HanhuaProgress.ParseLine("{\"level\":\"INFO\",\"msg\":\"page 3\"}");
+    Equal(false, noise.IsJson, "untyped json must not reset page progress");
+
     var plain = HanhuaProgress.ParseLine("human readable");
     Equal(false, plain.IsJson, "non-json stdout is a log line");
     Equal("human readable", plain.RawLine, "raw line is preserved");

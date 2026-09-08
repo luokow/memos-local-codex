@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -23,9 +22,9 @@ def mit_paths() -> tuple[Path, Path, Path]:
 def find_input(root: Path) -> Path:
     for name in ("typeset_in", "in", "src_rgb"):
         d = root / name
-        if d.is_dir() and any(d.glob("*.png")):
+        if d.is_dir() and local_qwen.list_image_files(d):
             return d
-    raise RuntimeError(f"no typeset input png in {root}")
+    raise RuntimeError(f"no typeset input image in {root}")
 
 
 def main() -> int:
@@ -80,8 +79,18 @@ def main() -> int:
     ]
     print("typeset", src, "->", dest)
     print("lookup", trans)
-    local_qwen.emit("phase", "typeset", message=f"{src} -> {dest}")
-    rc = subprocess.call(cmd, cwd=str(mit_root), env=env)
+    images = local_qwen.list_image_files(src)
+    local_qwen.emit(
+        "phase", "typeset", done=0, total=len(images), message=f"{src} -> {dest}"
+    )
+    rc = local_qwen.run_mit_with_page_progress(
+        cmd,
+        cwd=str(mit_root),
+        env=env,
+        phase="typeset",
+        total=len(images),
+        count=lambda: local_qwen.completed_image_pages(images, output_dirs=[dest]),
+    )
     print(f"mit_exit={rc}")
     if rc == 0:
         local_qwen.emit("done", "typeset", output=str(dest), message="嵌字完成")

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -38,13 +37,47 @@ def collect_mapping(root: Path) -> dict[str, str]:
 
 
 def copy_pngs(src: Path, dest: Path) -> list[Path]:
-    dest.mkdir(parents=True, exist_ok=True)
-    copied: list[Path] = []
-    for png in sorted(p for p in src.iterdir() if p.is_file() and p.suffix.lower() == ".png"):
-        target = dest / png.name
-        shutil.copy2(png, target)
-        copied.append(target)
-    return copied
+    return local_qwen.copy_images(src, dest)
+
+
+def retry_missing_ocr(
+    missing: list[Path],
+    *,
+    work: Path,
+    mit_py: Path,
+    font: Path,
+    cfg: Path,
+    mit_root: Path,
+    dump: Path,
+    env: dict[str, str],
+) -> None:
+    if not missing:
+        return
+    retry_in = work / "ocr_retry_in"
+    retry_out = work / "ocr_retry_out"
+    if retry_in.exists():
+        shutil.rmtree(retry_in)
+    if retry_out.exists():
+        shutil.rmtree(retry_out)
+    retry_in.mkdir(parents=True, exist_ok=True)
+    retry_out.mkdir(parents=True, exist_ok=True)
+    for img in missing:
+        shutil.copy2(img, retry_in / img.name)
+    cmd = mit_ocr_command(mit_py, font, cfg, retry_in, retry_out)
+    print("ocr-retry", retry_in, "->", retry_out, "pages", len(missing))
+    local_qwen.run_mit_with_page_progress(
+        cmd,
+        cwd=str(mit_root),
+        env=env,
+        phase="ocr",
+        total=len(missing),
+        count=lambda: local_qwen.completed_image_pages(
+            missing, ocr_dirs=[retry_in, retry_out], output_dirs=[retry_out]
+        ),
+    )
+    for folder in (retry_in, retry_out):
+        for ocr in folder.glob("*_ocr.json"):
+            shutil.copy2(ocr, dump / ocr.name)
 
 
 def mit_ocr_command(
@@ -81,7 +114,7 @@ def ocr_failed_message(rc: int, n_strings: int) -> str:
         return "抽字工具在保存文字后提前退出，没有处理完全部页。"
     if rc != 0:
         return f"抽字工具异常退出（代码 {rc}）。"
-    return "抽字完成，但没有识别到文字。请换含对白的 png 目录。"
+    return "抽字完成，但没有识别到文字。请换含对白的图片目录。"
 
 
 def main() -> int:
@@ -90,7 +123,7 @@ def main() -> int:
     local_qwen.enable_progress(jsonl)
     if len(argv) < 2:
         print(
-            "usage: ocr_extract_local.py [--progress-jsonl] <png-dir> <work-dir>",
+            "usage: ocr_extract_local.py [--progress-jsonl] <image-dir> <work-dir>",
             file=sys.stderr,
         )
         return 2
@@ -99,9 +132,9 @@ def main() -> int:
     if not src.is_dir():
         print(f"not a directory: {src}", file=sys.stderr)
         return 1
-    pngs = [p for p in src.iterdir() if p.is_file() and p.suffix.lower() == ".png"]
-    if not pngs:
-        msg = "这个目录里没有 png。请选含图片的文件夹。"
+    images = local_qwen.list_image_files(src)
+    if not images:
+        msg = "这个目录里没有图片（png/jpg/webp）。请选含图片的文件夹。"
         print(msg, file=sys.stderr)
         local_qwen.emit("error", "ocr", message=msg)
         return 1
@@ -135,8 +168,35 @@ def main() -> int:
     env["PYTHONIOENCODING"] = "utf-8"
     cmd = mit_ocr_command(mit_py, font, cfg, typeset_in, dump)
     print("ocr", typeset_in, "->", dump)
-    rc = subprocess.call(cmd, cwd=str(mit_root), env=env)
+    rc = local_qwen.run_mit_with_page_progress(
+        cmd,
+        cwd=str(mit_root),
+        env=env,
+        phase="ocr",
+        total=len(copied),
+        count=lambda: local_qwen.completed_image_pages(
+            copied, ocr_dirs=[typeset_in, dump], output_dirs=[dump]
+        ),
+    )
     print(f"mit_exit={rc}")
+
+    missing = local_qwen.missing_ocr_pages(copied, [typeset_in, dump])
+    if missing:
+        retry_missing_ocr(
+            missing,
+            work=work,
+            mit_py=mit_py,
+            font=font,
+            cfg=cfg,
+            mit_root=mit_root,
+            dump=dump,
+            env=env,
+        )
+        still = local_qwen.missing_ocr_pages(copied, [typeset_in, dump])
+        if still:
+            preview = ", ".join(p.stem for p in still[:8])
+            extra = f" 等 {len(still)} 页" if len(still) > 8 else ""
+            local_qwen.log(f"抽字后仍无文字 {len(still)} 页: {preview}{extra}")
 
     mapping = collect_mapping(typeset_in)
     mapping.update({k: v for k, v in collect_mapping(dump).items() if k not in mapping})
@@ -149,15 +209,22 @@ def main() -> int:
 
     work.mkdir(parents=True, exist_ok=True)
     trans.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"ocr strings={len(mapping)} -> {trans}")
+    still_missing = local_qwen.missing_ocr_pages(
+        copied, [typeset_in, dump, work / "ocr_sidecars"]
+    )
+    print(f"ocr strings={len(mapping)} missing_pages={len(still_missing)} -> {trans}")
     local_qwen.emit(
         "done",
         "ocr",
-        done=len(mapping),
-        total=len(mapping),
+        done=len(copied),
+        total=len(copied),
         output=str(work),
         empty=len(mapping),
-        message=f"抽出 {len(mapping)} 句",
+        message=(
+            f"抽出 {len(mapping)} 句"
+            if not still_missing
+            else f"抽出 {len(mapping)} 句，{len(still_missing)} 页无字"
+        ),
     )
     return 0
 
