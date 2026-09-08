@@ -11,6 +11,9 @@ package-static-2.0.12/
 *.log
 local-chat/data/
 local-chat/diagnostics/
+hanhua/work/
+hanhua/**/__pycache__/
+hanhua/*-cn/
 local-chat/QwenLocalChat.exe
 local-chat/QwenLocalChat.lnk
 **/bin/

@@ -8,6 +8,7 @@
 - **本地生成模型**：由 `runtime/model-service.json` 指定 GGUF、别名、上下文、GPU 层数、并发、思考模式和 Jinja 模板。MemOS 使用它完成记忆提取、归纳与评分。
 - **all-MiniLM-L6-v2**：把文本转换成 384 维向量，用来快速查找“意思相近但字面不同”的记忆。它不负责生成回答。
 - **MCP 适配器**：向 Codex 提供 `memos_recall`、`memos_remember`、`memos_health` 和 `memos_list_recent` 四个工具。
+- **汉化工具包**：`hanhua/` 是 Local AI 汉化页调用的 Python 脚本。不含游戏资源和第三方汉化软件。
 
 ## 数据位置
 
