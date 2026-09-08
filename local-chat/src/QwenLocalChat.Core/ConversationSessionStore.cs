@@ -112,6 +112,7 @@ public sealed class ConversationSessionStore(string path)
         MemosSessionId = session.MemosSessionId,
         LastFinishReason = session.LastFinishReason,
         DraftInput = session.DraftInput,
+        DraftAttachmentPaths = session.DraftAttachmentPaths,
         History = session.History
             .Select(m => new HistoryMessageDto { Role = m.Role, Content = m.Content })
             .ToList(),
@@ -148,6 +149,9 @@ public sealed class ConversationSessionStore(string path)
             MemosSessionId = memos,
             LastFinishReason = dto.LastFinishReason,
             DraftInput = dto.DraftInput ?? string.Empty,
+            DraftAttachmentPaths = (dto.DraftAttachmentPaths ?? [])
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .ToList(),
             History = (dto.History ?? [])
                 .Where(m => !string.IsNullOrWhiteSpace(m.Role))
                 .Select(m => new ChatMessage(m.Role!.Trim(), m.Content ?? string.Empty))
@@ -210,6 +214,9 @@ public sealed class ConversationSessionStore(string path)
 
         [JsonPropertyName("draftInput")]
         public string? DraftInput { get; set; }
+
+        [JsonPropertyName("draftAttachmentPaths")]
+        public List<string>? DraftAttachmentPaths { get; set; }
 
         [JsonPropertyName("history")]
         public List<HistoryMessageDto>? History { get; set; }

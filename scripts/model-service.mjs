@@ -74,6 +74,16 @@ export async function loadModelServiceConfig({ root, configPath = process.env.MO
   return { config: parsed, configPath: path.resolve(configPath), configSha256: configSha256(parsed) };
 }
 
+// Keep in lockstep with ModelLaunchCommand.EightGbRuntimeFlags (C# WinUI launcher).
+export const EIGHT_GB_RUNTIME_FLAGS = [
+  "--flash-attn", "on",
+  "--cache-type-k", "q8_0",
+  "--cache-type-v", "q8_0",
+  "--cache-ram", "1024",
+  "--fit-target", "512",
+  "--spec-type", "ngram-mod",
+];
+
 export function buildLaunchArguments(config, root) {
   const args = [
     "--model", resolveConfiguredPath(root, config.model_path),
@@ -87,6 +97,7 @@ export function buildLaunchArguments(config, root) {
   if (config.use_jinja) args.push("--jinja");
   args.push("--parallel", String(config.parallel_slots));
   if (config.parallel_slots > 1) args.push("--kv-unified");
+  args.push(...EIGHT_GB_RUNTIME_FLAGS);
   return args;
 }
 

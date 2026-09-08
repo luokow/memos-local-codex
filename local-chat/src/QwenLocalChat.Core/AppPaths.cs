@@ -5,13 +5,17 @@ public sealed record AppPaths(
     string ProjectRoot,
     string SettingsFile,
     string SessionsFile,
+    string VideoSessionsFile,
     string LogsRoot,
     string DiagnosticsRoot,
     string ModelServiceConfigFile,
     string ModelStartLockFile,
     string ModelLifecycleLogFile,
     string ModelLogFile,
-    string McpServerScript)
+    string McpServerScript,
+    string VideoServiceConfigFile,
+    string ModelProfilesFile,
+    string VideoModelProfilesFile)
 {
     public static AppPaths Discover()
     {
@@ -26,13 +30,17 @@ public sealed record AppPaths(
             projectRoot,
             System.IO.Path.Combine(localChatRoot, "data", "settings.json"),
             System.IO.Path.Combine(localChatRoot, "data", "sessions.json"),
+            System.IO.Path.Combine(localChatRoot, "data", "video-sessions.json"),
             System.IO.Path.Combine(localChatRoot, "logs"),
             System.IO.Path.Combine(localChatRoot, "diagnostics"),
             ModelServiceConfigStore.ResolveConfigPath(projectRoot),
             System.IO.Path.Combine(projectRoot, "runtime", "locks", "model-service-start.lock"),
             System.IO.Path.Combine(projectRoot, "runtime", "logs", "model-service-lifecycle.jsonl"),
             System.IO.Path.Combine(localChatRoot, "diagnostics", "llama-local-chat.log"),
-            System.IO.Path.Combine(projectRoot, "scripts", "mcp-server.mjs"));
+            System.IO.Path.Combine(projectRoot, "scripts", "mcp-server.mjs"),
+            System.IO.Path.Combine(projectRoot, "runtime", "video-service.json"),
+            System.IO.Path.Combine(projectRoot, "runtime", "model-profiles.json"),
+            System.IO.Path.Combine(projectRoot, "runtime", "video-model-profiles.json"));
     }
 
     private static string FindLocalChatRoot(string start)

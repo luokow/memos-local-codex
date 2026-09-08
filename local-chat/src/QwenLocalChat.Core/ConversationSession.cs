@@ -24,6 +24,7 @@ public sealed class ConversationSession
     public string? LastFinishReason { get; set; }
     /// <summary>Unsent composer text preserved when switching away from this session.</summary>
     public string DraftInput { get; set; } = string.Empty;
+    public List<string> DraftAttachmentPaths { get; set; } = [];
     /// <summary>
     /// In-progress segmented long-form job (约 N 字 → multi-turn). Not required for short chats.
     /// </summary>
@@ -57,13 +58,16 @@ public sealed class ConversationSession
         IReadOnlyList<ChatMessage> history,
         IEnumerable<(string Label, string Text)> transcript,
         string? lastFinishReason,
-        string? draftInput = null)
+        string? draftInput = null,
+        IReadOnlyList<string>? draftAttachmentPaths = null)
     {
         History = history.Select(m => new ChatMessage(m.Role, m.Content)).ToList();
         Transcript = ConversationExport.FromTranscript(transcript).ToList();
         LastFinishReason = lastFinishReason;
         if (draftInput is not null)
             DraftInput = draftInput;
+        if (draftAttachmentPaths is not null)
+            DraftAttachmentPaths = draftAttachmentPaths.Where(path => !string.IsNullOrWhiteSpace(path)).ToList();
         UpdatedAt = DateTimeOffset.Now;
         if (Title is "新会话" or "")
             Title = SuggestTitle(History);

@@ -4,6 +4,22 @@ namespace QwenLocalChat.Core;
 
 public static class ModelLaunchCommand
 {
+    /// <summary>
+    /// 8GB Ada defaults from llama.cpp server: FA is required for V-cache quant;
+    /// q8 KV is the quality-safe cache type; host prompt cache default (8192 MiB)
+    /// is too large for ~16GB RAM; ngram-mod drafts without extra VRAM.
+    /// --fit only fills unset args, so explicit --ctx-size / --n-gpu-layers stay.
+    /// </summary>
+    public static readonly string[] EightGbRuntimeFlags =
+    [
+        "--flash-attn", "on",
+        "--cache-type-k", "q8_0",
+        "--cache-type-v", "q8_0",
+        "--cache-ram", "1024",
+        "--fit-target", "512",
+        "--spec-type", "ngram-mod",
+    ];
+
     public static IReadOnlyList<string> BuildArguments(LocalModelOptions options)
     {
         var arguments = new List<string>
@@ -25,6 +41,7 @@ public static class ModelLaunchCommand
         // jobs share the same pool only when they actually run together.
         if (options.ParallelSlots > 1)
             arguments.Add("--kv-unified");
+        arguments.AddRange(EightGbRuntimeFlags);
         return arguments;
     }
 }
@@ -36,7 +53,7 @@ public sealed class WindowsModelProcessLauncher : IModelProcessLauncher
         if (!File.Exists(options.ServerExecutable))
             throw new FileNotFoundException("找不到 llama-server.exe", options.ServerExecutable);
         if (!File.Exists(options.ModelFile))
-            throw new FileNotFoundException("找不到 Qwen 模型", options.ModelFile);
+            throw new FileNotFoundException("找不到所选文本模型", options.ModelFile);
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(options.LogFile)!);
 
         var start = new ProcessStartInfo(options.ServerExecutable)

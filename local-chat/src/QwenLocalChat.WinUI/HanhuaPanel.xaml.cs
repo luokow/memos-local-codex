@@ -22,6 +22,8 @@ public sealed partial class HanhuaPanel : UserControl
     private readonly ObservableCollection<string> _log = [];
     private readonly HanhuaProcessHost _host = new();
     private readonly StringBuilder _detail = new();
+    private readonly Stopwatch _elapsed = new();
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _elapsedTicker;
     private HanhuaJobStore? _store;
     private Func<LocalChatSettings>? _settings;
     private Func<bool>? _chatBusy;
@@ -44,6 +46,7 @@ public sealed partial class HanhuaPanel : UserControl
     public bool IsBusy => _job?.Status is HanhuaJobStatus.Running or HanhuaJobStatus.Cancelling;
     public bool HasInterruptedWork { get; private set; }
     public string? InterruptedWorkSummary { get; private set; }
+    private TimeSpan DisplayElapsed => _elapsed.Elapsed;
 
     public event EventHandler? SettingsRequested;
     public event EventHandler<HanhuaGpuNeedChangedEventArgs>? GpuNeedChanged;
@@ -102,9 +105,12 @@ public sealed partial class HanhuaPanel : UserControl
     }
 
     private void KindBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        => HanhuaEmptyState.Text = SelectedKind == HanhuaKind.Image
-            ? "选择含 png 的目录后开始"
-            : "选择游戏或图片目录后开始";
+    {
+        if (HanhuaEmptyStateHint is null) return;
+        HanhuaEmptyStateHint.Text = HanhuaProgressStatus.EmptyHint(SelectedKind);
+        if (HanhuaComposerHint is not null)
+            HanhuaComposerHint.Text = HanhuaProgressStatus.ComposerHint(SelectedKind);
+    }
 
     private void EngineBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -187,8 +193,12 @@ public sealed partial class HanhuaPanel : UserControl
         _store.Upsert(job);
         _runCts = new CancellationTokenSource();
         _detail.Clear();
+        DispatcherQueue.TryEnqueue(() => _log.Clear());
         HanhuaEmptyState.Visibility = Visibility.Collapsed;
         ResultPreview.Visibility = Visibility.Collapsed;
+        AppendLog(HanhuaProgressStatus.StartBanner(kind));
+        StartElapsedTicker();
+        ApplyProgressUi();
         UpdateButtons();
         try
         {
@@ -198,7 +208,7 @@ public sealed partial class HanhuaPanel : UserControl
                 await RunImageAsync(settings, job, _runCts.Token);
             if (_job.Status == HanhuaJobStatus.Cancelling)
             {
-                Finish(HanhuaJobStatus.Interrupted, _job.Phase, "已取消。已完成的句子还在。");
+                Finish(HanhuaJobStatus.Interrupted, _job.Phase, "已取消。已完成的部分还在，点开始汉化可从当前步继续。");
                 return;
             }
             Finish(HanhuaJobStatus.Succeeded, _job.Phase, "汉化完成。");
@@ -206,7 +216,7 @@ public sealed partial class HanhuaPanel : UserControl
         }
         catch (OperationCanceledException)
         {
-            Finish(HanhuaJobStatus.Interrupted, _job.Phase, "已取消。已完成的句子还在。");
+            Finish(HanhuaJobStatus.Interrupted, _job.Phase, "已取消。已完成的部分还在，点开始汉化可从当前步继续。");
         }
         catch (Exception error)
         {
@@ -214,6 +224,7 @@ public sealed partial class HanhuaPanel : UserControl
         }
         finally
         {
+            StopElapsedTicker();
             GpuNeedChanged?.Invoke(this, new(HanhuaGpuNeed.None, null));
             _runCts?.Dispose();
             _runCts = null;
@@ -251,7 +262,7 @@ public sealed partial class HanhuaPanel : UserControl
         await _prepareGpu(need, cancellationToken);
         _job = _job with { Phase = phase, Status = HanhuaJobStatus.Running, UpdatedUtc = DateTimeOffset.UtcNow };
         _store?.Upsert(_job);
-        SetBusyStatus(phase.ToString(), _job.Done, _job.Total);
+        DispatcherQueue.TryEnqueue(ApplyProgressUi);
         var code = await _host.RunAsync(launch, OnProgress, AppendLog, cancellationToken);
         if (cancellationToken.IsCancellationRequested || _job.Status == HanhuaJobStatus.Cancelling)
             throw new OperationCanceledException();
@@ -279,8 +290,13 @@ public sealed partial class HanhuaPanel : UserControl
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
         _store?.Upsert(_job);
-        if (!string.IsNullOrWhiteSpace(progress.Message)) AppendLog(progress.Message);
-        DispatcherQueue.TryEnqueue(() => SetBusyStatus(progress.Message ?? phase.ToString(), _job.Done, _job.Total));
+        if (!string.IsNullOrWhiteSpace(progress.Message))
+        {
+            AppendLog(progress.Type == "error"
+                ? HanhuaErrorPresentation.Summarize(progress.Message, phase)
+                : progress.Message);
+        }
+        DispatcherQueue.TryEnqueue(ApplyProgressUi);
     }
 
     private async Task CancelAsync()
@@ -288,6 +304,7 @@ public sealed partial class HanhuaPanel : UserControl
         if (_job is null) return;
         _job = _job with { Status = HanhuaJobStatus.Cancelling, UpdatedUtc = DateTimeOffset.UtcNow };
         _store?.Upsert(_job);
+        ApplyProgressUi();
         try { _runCts?.Cancel(); } catch { }
         await Task.Delay(50);
     }
@@ -295,12 +312,14 @@ public sealed partial class HanhuaPanel : UserControl
     private void Finish(HanhuaJobStatus status, HanhuaPhase phase, string message)
     {
         if (_job is null) return;
-        _job = _job with { Status = status, Phase = phase, Message = message, Error = status == HanhuaJobStatus.Failed ? message : null, UpdatedUtc = DateTimeOffset.UtcNow };
+        StopElapsedTicker();
+        var display = HanhuaErrorPresentation.DisplayMessage(_job.Kind, phase, status, message);
+        _job = _job with { Status = status, Phase = phase, Message = display, Error = status == HanhuaJobStatus.Failed ? message : null, UpdatedUtc = DateTimeOffset.UtcNow };
         _store?.Upsert(_job);
-        AppendLog(message);
-        SetIdleStatus(message);
+        AppendLog(display);
+        SetIdleStatus(HanhuaProgressStatus.FormatFinished(display, DisplayElapsed));
         HasInterruptedWork = status is HanhuaJobStatus.Interrupted;
-        InterruptedWorkSummary = HasInterruptedWork ? message : null;
+        InterruptedWorkSummary = HasInterruptedWork ? display : null;
         OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(_job.OutputPath);
         HanhuaErrorDetailsButton.Visibility = status == HanhuaJobStatus.Failed ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -308,6 +327,7 @@ public sealed partial class HanhuaPanel : UserControl
     private void AppendLog(string line)
     {
         _detail.AppendLine(line);
+        if (IsNoiseLog(line)) return;
         DispatcherQueue.TryEnqueue(() =>
         {
             _log.Add(line);
@@ -318,22 +338,61 @@ public sealed partial class HanhuaPanel : UserControl
         });
     }
 
-    private void SetBusyStatus(string text, int done, int total)
+    private static bool IsNoiseLog(string line)
     {
-        HanhuaStatusBox.Text = OneLine(text);
-        var generating = true;
-        HanhuaJobProgress.Visibility = generating ? Visibility.Visible : Visibility.Collapsed;
-        HanhuaJobPercentText.Visibility = generating ? Visibility.Visible : Visibility.Collapsed;
-        if (total > 0)
+        var text = line.Trim();
+        return text.StartsWith("Don't continue if --save-text", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("mit_exit=", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Failed to open image:", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("TypeError: 'str' object does not support item assignment", StringComparison.Ordinal);
+    }
+
+    private void StartElapsedTicker()
+    {
+        _elapsed.Restart();
+        _elapsedTicker ??= DispatcherQueue.CreateTimer();
+        _elapsedTicker.Interval = TimeSpan.FromSeconds(1);
+        _elapsedTicker.IsRepeating = true;
+        _elapsedTicker.Tick -= ElapsedTicker_Tick;
+        _elapsedTicker.Tick += ElapsedTicker_Tick;
+        _elapsedTicker.Start();
+    }
+
+    private void StopElapsedTicker()
+    {
+        _elapsed.Stop();
+        if (_elapsedTicker is null) return;
+        _elapsedTicker.Stop();
+        _elapsedTicker.Tick -= ElapsedTicker_Tick;
+    }
+
+    private void ElapsedTicker_Tick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        if (!IsBusy) return;
+        ApplyProgressUi();
+    }
+
+    private void ApplyProgressUi()
+    {
+        if (_job is null) return;
+        var live = HanhuaProgressStatus.FromJob(_job, DisplayElapsed);
+        HanhuaStatusBox.Text = OneLine(live.StatusText);
+        HanhuaJobProgress.Visibility = Visibility.Visible;
+        if (live.Determinate)
         {
             HanhuaJobProgress.IsIndeterminate = false;
-            HanhuaJobProgress.Value = Math.Clamp(100.0 * done / total, 0, 100);
-            HanhuaJobPercentText.Text = $"{Math.Clamp((int)Math.Round(100.0 * done / total), 0, 100)}%";
+            HanhuaJobProgress.Maximum = 100;
+            HanhuaJobProgress.Value = Math.Clamp((live.Fraction ?? 0) * 100, 0, 100);
+            HanhuaJobPercentText.Text = live.PercentText;
+            HanhuaJobPercentText.Visibility = Visibility.Visible;
         }
         else
         {
             HanhuaJobProgress.IsIndeterminate = true;
-            HanhuaJobPercentText.Text = "";
+            HanhuaJobPercentText.Text = live.PercentText;
+            HanhuaJobPercentText.Visibility = string.IsNullOrWhiteSpace(live.PercentText)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         }
         UpdateButtons();
     }
@@ -349,7 +408,6 @@ public sealed partial class HanhuaPanel : UserControl
     private void UpdateButtons()
     {
         var busy = IsBusy;
-        StartHanhuaButton.Visibility = busy ? Visibility.Collapsed : Visibility.Visible;
         CancelHanhuaButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ComposerStartButton.Content = busy ? "取消" : "开始汉化";
         KindBox.IsEnabled = !busy;

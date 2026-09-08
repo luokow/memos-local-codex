@@ -8,9 +8,10 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using FolderPicker = Microsoft.Windows.Storage.Pickers.FolderPicker;
+using Windows.Storage.Pickers;
 using QwenLocalChat.Core;
 using Windows.Storage;
-using Windows.Storage.Pickers;
 using Windows.System;
 using Windows.UI;
 using Windows.UI.Core;
@@ -27,15 +28,21 @@ public sealed partial class MainPage : Page
     private static readonly Color ErrorText = ColorHelper.FromArgb(255, 255, 107, 107);
 
     private readonly List<ChatMessage> _history = [];
+    private readonly List<string> _attachmentPaths = [];
     private readonly InputHistoryNavigator _inputHistory = new();
     private readonly MemoryWriteQueue _memoryQueue = new();
     private readonly SemaphoreSlim _memosGate = new(1, 1);
     private readonly ConversationSessionWorkspace _sessions = new();
     private bool _suppressSessionPicker;
+    private bool _suppressVideoSessionPicker;
     private AppPaths? _paths;
     private SettingsStore? _settingsStore;
     private ModelServiceConfigStore? _modelConfigStore;
     private ModelServiceConfig? _modelConfig;
+    private ModelProfileCatalogStore? _modelProfileStore;
+    private ModelProfileCatalog? _modelProfiles;
+    private VideoModelProfileCatalogStore? _videoProfileStore;
+    private VideoModelProfileCatalog? _videoProfiles;
     private ConversationSessionStore? _sessionStore;
     private QwenServiceManager? _modelManager;
     private QwenChatClient? _chatClient;
@@ -44,9 +51,11 @@ public sealed partial class MainPage : Page
     private LocalChatSettings _settings = LocalChatSettings.SafeDefaults;
     private LocalChatSettings _activeModelSettings = LocalChatSettings.SafeDefaults;
     private bool _loadingSettings;
+    private bool _settingsOpenedForVideo;
     private bool _busy;
     private bool _initialized;
     private bool _disposed;
+    private ExpandedEditorMode _expandedEditorMode;
     private string? _lastFinishReason;
     private string _initializationStage = "页面加载";
     /// <summary>
@@ -54,8 +63,39 @@ public sealed partial class MainPage : Page
     /// <c>parallel_slots</c> setting so multi-session concurrent replies stay isolated.
     /// </summary>
     private readonly Dictionary<string, SessionGeneration> _generations = new(StringComparer.Ordinal);
+    private readonly SessionJobQueue<ChatQueuedTurn> _chatQueue = new(turn => turn.SessionId);
+    private bool _drainChatQueue = true;
+    /// <summary>Last conversation that used llama-server. Switching threads must drop that slot KV.</summary>
+    private string? _lastModelSessionId;
+
+    private enum ExpandedEditorMode { Chat, Video, ReadOnly }
 
     public ObservableCollection<TranscriptEntry> TranscriptItems { get; } = [];
+
+    private void ModeSelector_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        // View navigation deliberately does not cancel a running chat, video, or hanhua job.
+        var chat = sender.SelectedItem == ChatModeItem;
+        var video = sender.SelectedItem == VideoModeItem;
+        var hanhua = sender.SelectedItem == HanhuaModeItem;
+        VideoModeHost.Visibility = video ? Visibility.Visible : Visibility.Collapsed;
+        HanhuaModeHost.Visibility = hanhua ? Visibility.Visible : Visibility.Collapsed;
+        ChatTranscriptHost.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
+        ChatComposerHost.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
+        ChatFooterHost.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
+        ChatToolsHost.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
+        VideoSessionToolsHost.Visibility = video ? Visibility.Visible : Visibility.Collapsed;
+        TextModelToolsHost.Visibility = video ? Visibility.Collapsed : Visibility.Visible;
+        VideoToolsHost.Visibility = video ? Visibility.Visible : Visibility.Collapsed;
+        QwenStatusBorder.Visibility = video ? Visibility.Collapsed : Visibility.Visible;
+        VideoStatusBorder.Visibility = video ? Visibility.Visible : Visibility.Collapsed;
+        NoticeText.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
+        ToolTipService.SetToolTip(
+            StartTextModelPageButton,
+            hanhua ? "填字阶段会自动启动本机 Qwen，一般不用点这里。" : null);
+        if (video) VideoPanel.RefreshPresetSummary();
+        else if (chat) UpdateChatComposerLayout();
+    }
 
     private sealed class SessionGeneration
     {
@@ -97,12 +137,31 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
+        ModeSelector.SelectedItem = ChatModeItem;
         Loaded += MainPage_Loaded;
+        SizeChanged += (_, _) => UpdateChatComposerLayout();
+        InputBox.TextChanged += (_, _) => UpdateChatComposerLayout();
+        ExpandedEditorText.TextChanged += (_, _) => UpdateExpandedMentions();
+        ExpandedEditorText.SelectionChanged += (_, _) => UpdateExpandedMentions();
         _memoryQueue.StateChanged += MemoryQueue_StateChanged;
         SettingsPanel.SaveRequested += SettingsPanel_SaveRequested;
         SettingsPanel.CloseRequested += SettingsPanel_CloseRequested;
+        SettingsPanel.TextImportRequested += async (_, _) => await ImportTextModelAsync();
+        SettingsPanel.VideoImportRequested += async (_, _) => await ImportVideoModelAsync();
+        SettingsPanel.ReleaseTextModelRequested += async (_, _) => await ReleaseTextModelAsync();
+        SettingsPanel.ReleaseVideoModelRequested += async (_, _) => await ReleaseVideoModelAsync();
         // Focus only after close animation finishes — focusing mid-slide causes UI thrash/jank.
-        SettingsPanel.Closed += (_, _) => SettingsButton.Focus(FocusState.Programmatic);
+        VideoPanel.SettingsRequested += (_, _) => OpenSettings(videoSection: true);
+        VideoPanel.ModelStatusChanged += UpdateVideoModelStatus;
+        HanhuaPanel.SettingsRequested += (_, _) => OpenSettings(videoSection: false);
+        HanhuaPanel.GpuNeedChanged += HanhuaPanel_GpuNeedChanged;
+        VideoPanel.ExpandedTextRequested += ShowVideoExpandedText;
+        VideoPanel.SessionsChanged += (_, _) => RefreshVideoSessionPicker();
+        SettingsPanel.Closed += (_, _) =>
+        {
+            if (_settingsOpenedForVideo) VideoPanel.FocusSettingsButton();
+            else SettingsButton.Focus(FocusState.Programmatic);
+        };
     }
 
     private async void MainPage_Loaded(object sender, RoutedEventArgs e)
@@ -118,7 +177,25 @@ public sealed partial class MainPage : Page
             _modelConfigStore = new ModelServiceConfigStore(_paths.ProjectRoot, _paths.ModelServiceConfigFile);
             var modelConfigLoad = _modelConfigStore.LoadOrMigrate(_paths.SettingsFile);
             _modelConfig = modelConfigLoad.Config;
+            _modelProfileStore = new ModelProfileCatalogStore(_paths.ProjectRoot, _paths.ModelProfilesFile);
+            _modelProfiles = _modelProfileStore.Load();
+            _videoProfileStore = new VideoModelProfileCatalogStore(_paths.ProjectRoot, _paths.VideoModelProfilesFile);
+            _videoProfiles = _videoProfileStore.Load();
             LoadSettings();
+            VideoPanel.Configure(
+                PrepareForVideoAsync,
+                () => _settings.VideoGeneration,
+                () => _videoProfiles!.Resolve(_settings.SelectedVideoProfileId),
+                _paths.ProjectRoot,
+                () => _settings.VideoPromptPhrases);
+            HanhuaPanel.Configure(
+                () => _settings,
+                () => _generations.Count > 0,
+                () => VideoPanel.IsGenerating,
+                PrepareForHanhuaGpuAsync,
+                PickHanhuaFolderAsync,
+                PersistHanhuaEngine,
+                _paths.LocalChatRoot);
             if (modelConfigLoad.Migrated) _settingsStore.Save(_settings);
             _initializationStage = "创建模型客户端";
             CreateModelClients(_settings);
@@ -146,8 +223,31 @@ public sealed partial class MainPage : Page
             }
 
             RefreshSessionPicker();
-            _initializationStage = "检查模型服务";
-            await InitializeModelAsync();
+            RefreshVideoSessionPicker();
+            _initializationStage = "准备模型服务";
+            UpdateTextModelStatus(ModelLifecycleState.NotStarted);
+            UpdateVideoModelStatus(new(ModelLifecycleState.NotStarted));
+            if (VideoPanel.HasInterruptedWork)
+            {
+                ModeSelector.SelectedItem = VideoModeItem;
+                if (VideoPanel.InterruptedWorkSummary is { } summary)
+                    SetNotice(summary, WarningText);
+                try { await StartVideoModelAsync(); }
+                catch (Exception error) { SetNotice($"恢复视频任务前启动服务失败：{error.Message}", ErrorText); }
+                _ = RestoreInterruptedVideoWorkAsync();
+            }
+            else if (HanhuaPanel.HasInterruptedWork)
+            {
+                ModeSelector.SelectedItem = HanhuaModeItem;
+                if (HanhuaPanel.InterruptedWorkSummary is { } summary)
+                    SetNotice(summary, WarningText);
+                var plan = StartupModelPlan.Resolve(_settings.StartupModel);
+                if (plan.StartTextModel) await StartTextModelAsync();
+            }
+            else
+            {
+                await ApplyStartupModelSelectionAsync();
+            }
             UpdateContinueButtonState();
         }
         catch (Exception error)
@@ -161,7 +261,7 @@ public sealed partial class MainPage : Page
     private void MaybeShowOnboardingTips()
     {
         if (_settings.OnboardingSeen || _settingsStore is null) return;
-        AppendSystem("欢迎使用 Qwen Local：模型仅监听本机 127.0.0.1，不调用云端 API。");
+        AppendSystem("欢迎使用 Local AI：聊天和视频模型仅监听本机回环地址，不调用云端 API。");
         AppendSystem("快速上手：顶栏可切换/新建会话；底部开关控制 MemOS 与日志；「设置」调参数；停止或达上限后可用「继续生成」；「更多」里可导出对话。");
         try
         {
@@ -180,28 +280,20 @@ public sealed partial class MainPage : Page
     /// Ask whether to stop the local model when leaving. Shows for both owned and reused services
     /// (reused = previous session left the process running). Avoids ContentDialog (crash-prone here).
     /// </summary>
-    public async Task<AppCloseDecision> RequestCloseDecisionAsync()
+    public Task<AppCloseDecision> RequestCloseDecisionAsync()
     {
-        if (_disposed) return AppCloseDecision.ExitKeepModel;
-        if (_modelManager is null) return AppCloseDecision.ExitKeepModel;
-
-        var ownsModel = _modelManager.OwnsModel;
-        var serviceRunning = ownsModel || await _modelManager.IsHealthyAsync();
-        if (!serviceRunning) return AppCloseDecision.ExitKeepModel;
+        if (_disposed) return Task.FromResult(AppCloseDecision.ExitKeepModel);
+        var presentation = AppClosePromptPresentation.Create();
 
         _closeDecisionTcs?.TrySetResult(AppCloseDecision.Cancel);
         _closeDecisionTcs = new TaskCompletionSource<AppCloseDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
-        ClosePromptTitle.Text = "退出 Qwen Local";
-        ClosePromptMessage.Text = ownsModel
-            ? "本窗口启动了本地模型服务。关闭时是否一并停止？"
-            : "本机模型服务仍在运行（当前为「已复用」）。关闭时是否一并停止？";
-        CloseStopModelHint.Text = ownsModel
-            ? "停止模型可释放 GPU/内存；改过的启动参数下次打开才生效。"
-            : "停止模型会结束端口上的 llama 服务；改过的启动参数下次打开才生效。";
+        ClosePromptTitle.Text = "退出 Local AI";
+        ClosePromptMessage.Text = presentation.Message;
+        CloseStopModelHint.Text = presentation.Hint;
         ClosePromptOverlay.Visibility = Visibility.Visible;
         ClosePromptOverlay.IsHitTestVisible = true;
         CloseStopModelButton.Focus(FocusState.Programmatic);
-        return await _closeDecisionTcs.Task;
+        return _closeDecisionTcs.Task;
     }
 
     private void CloseStopModelButton_Click(object sender, RoutedEventArgs e)
@@ -226,6 +318,8 @@ public sealed partial class MainPage : Page
     {
         if (_disposed) return;
         _disposed = true;
+        _drainChatQueue = false;
+        while (_chatQueue.Dequeue() is not null) { }
         CompleteClosePrompt(AppCloseDecision.Cancel);
         _memoryQueue.StateChanged -= MemoryQueue_StateChanged;
         SettingsPanel.SaveRequested -= SettingsPanel_SaveRequested;
@@ -253,6 +347,8 @@ public sealed partial class MainPage : Page
         _memoryQueue.CancelPending();
         try { await _memoryQueue.DrainAsync(); } catch { }
         await DisposeMemosAsync();
+        await HanhuaPanel.ShutdownAsync();
+        await VideoPanel.ShutdownAsync(stopOwnedModel, detachRunningWork: true);
         _chatClient?.Dispose();
         if (_modelManager is not null)
         {
@@ -277,10 +373,22 @@ public sealed partial class MainPage : Page
 
     private void LoadSettings()
     {
-        if (_settingsStore is null) return;
+        if (_settingsStore is null || _modelProfiles is null || _videoProfiles is null || _modelConfigStore is null) return;
         _loadingSettings = true;
         var loaded = _settingsStore.Load();
-        _settings = _modelConfig is null ? loaded.Settings : loaded.Settings.WithModelService(_modelConfig);
+        var selectedText = _modelProfiles.Resolve(loaded.Settings.SelectedTextProfileId);
+        var selectedVideo = _videoProfiles.Resolve(loaded.Settings.SelectedVideoProfileId);
+        _modelConfig = selectedText.Service;
+        _modelConfigStore.Save(_modelConfig);
+        _settings = loaded.Settings with
+        {
+            SelectedTextProfileId = selectedText.Id,
+            SelectedVideoProfileId = selectedVideo.Id,
+        };
+        _settings = _settings.WithModelService(_modelConfig);
+        if (!string.Equals(loaded.Settings.SelectedTextProfileId, selectedText.Id, StringComparison.Ordinal)
+            || !string.Equals(loaded.Settings.SelectedVideoProfileId, selectedVideo.Id, StringComparison.Ordinal))
+            _settingsStore.Save(_settings);
         UseMemosToggle.IsOn = loaded.Settings.UseMemos;
         SaveLogsToggle.IsOn = loaded.Settings.SaveChatLogs;
         if (_chatLog is not null) _chatLog.Enabled = loaded.Settings.SaveChatLogs;
@@ -328,7 +436,8 @@ public sealed partial class MainPage : Page
 
     private void CreateModelClients(LocalChatSettings settings)
     {
-        if (_paths is null || _modelConfig is null) throw new InvalidOperationException("模型服务配置尚未初始化");
+        if (_paths is null || _modelConfig is null || _modelProfiles is null || _videoProfiles is null)
+            throw new InvalidOperationException("模型档案尚未初始化");
         var options = _modelConfig.ToLocalModelOptions(
             _paths.ProjectRoot,
             _paths.ModelLogFile,
@@ -337,19 +446,79 @@ public sealed partial class MainPage : Page
         _modelManager = new QwenServiceManager(options, new WindowsModelProcessLauncher());
         _chatClient = new QwenChatClient(options.ChatCompletionsUri);
         _activeModelSettings = settings;
+        var textProfile = _modelProfiles.Resolve(settings.SelectedTextProfileId);
+        var videoProfile = _videoProfiles.Resolve(settings.SelectedVideoProfileId);
         EndpointText.Text = $"LOCAL CORE  /  {_modelConfig.BindHost}:{_modelConfig.Port}";
+        TextModelSummaryText.Text = $"{textProfile.DisplayName}  {_modelConfig.BindHost}:{_modelConfig.Port}";
+        ChatComposerMetaText.Text = FormatTextComposerMeta(settings);
+        VideoModelSummaryText.Text = $"{videoProfile.DisplayName}  {videoProfile.Service.BindHost}:{videoProfile.Service.Port}";
         if (App.Window is MainWindow window) window.SetEndpointSubtitle(_modelConfig.BindHost, _modelConfig.Port);
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        SettingsPanel.Open(_settings);
+        OpenSettings(ModeSelector.SelectedItem == VideoModeItem);
+    }
+
+    private void PersistHanhuaEngine(HanhuaEngine engine)
+    {
+        if (_settingsStore is null) return;
+        var json = HanhuaEngineCodec.ToJson(engine);
+        if (string.Equals(_settings.HanhuaEngine, json, StringComparison.Ordinal)) return;
+        _settings = _settings with { HanhuaEngine = json };
+        _settingsStore.Save(_settings);
+    }
+
+    private async Task<string?> PickHanhuaFolderAsync(string commitButtonText)
+    {
+        var picker = CreateModelFolderPicker(commitButtonText);
+        var folder = await picker.PickSingleFolderAsync();
+        return folder?.Path;
+    }
+
+    private void HanhuaPanel_GpuNeedChanged(object? sender, HanhuaGpuNeedChangedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(e.StatusText))
+            SetStatus(QwenStatusText, "• " + e.StatusText, WarningText);
+        var label = StartTextModelPageButton.Content as string;
+        var occupied = label is "启动中" or "已启动";
+        StartTextModelPageButton.IsEnabled = !occupied && !HanhuaPanel.IsBusy;
+    }
+
+    private async Task PrepareForHanhuaGpuAsync(HanhuaGpuNeed need, CancellationToken cancellationToken)
+    {
+        if (need == HanhuaGpuNeed.None) return;
+        if (need == HanhuaGpuNeed.Qwen)
+        {
+            if (_settings.EnforceTextVideoModelExclusivity)
+                await VideoPanel.ReleaseModelAsync(cancellationToken);
+            if (_modelManager is null) throw new InvalidOperationException("文本模型尚未初始化。");
+            await _modelManager.EnsureAvailableAsync(cancellationToken);
+            if (!await _modelManager.IsHealthyAsync(cancellationToken))
+                throw new InvalidOperationException("本机 Qwen 没能自动启动，填字无法继续。");
+            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+            return;
+        }
+
+        if (_modelManager is not null)
+            await _modelManager.StopServiceAsync(cancellationToken);
+        await VideoPanel.ReleaseModelAsync(cancellationToken);
+        if (_modelManager is not null && await _modelManager.IsHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("聊天服务仍在占用本地端口；OCR 和嵌字需要先停掉本机 Qwen。");
+        UpdateTextModelStatus(ModelLifecycleState.Released);
+    }
+
+    private void OpenSettings(bool videoSection)
+    {
+        if (_modelProfiles is null || _videoProfiles is null) return;
+        _settingsOpenedForVideo = videoSection;
+        SettingsPanel.Open(_settings, _modelProfiles, _videoProfiles, videoSection);
     }
 
     private async void SettingsPanel_SaveRequested(object? sender, SettingsSaveRequestedEventArgs e)
     {
         DismissSettingsPanel();
-        await ApplyRuntimeSettingsAsync(e.Settings);
+        await ApplyRuntimeSettingsAsync(e.Settings, e.EditedVideoProfile);
     }
 
     private void SettingsPanel_CloseRequested(object? sender, EventArgs e)
@@ -361,21 +530,50 @@ public sealed partial class MainPage : Page
         SettingsPanel.Close();
     }
 
-    private async Task ApplyRuntimeSettingsAsync(LocalChatSettings candidate)
+    private async Task ApplyRuntimeSettingsAsync(LocalChatSettings candidate, VideoModelProfile editedVideoProfile)
     {
         if (_settingsStore is null) return;
+        if (VideoPanel.IsGenerating)
+        {
+            SetNotice("视频仍在生成，暂不能重启聊天模型；请等待完成或先取消视频任务。", WarningText);
+            return;
+        }
 
         var previous = _settings;
         var previousModelConfig = _modelConfig;
+        var previousProfiles = _modelProfiles;
+        var previousVideoProfiles = _videoProfiles;
         try
         {
-            if (_modelConfigStore is null || previousModelConfig is null)
-                throw new InvalidOperationException("模型服务配置尚未初始化");
-            var candidateModelConfig = candidate.ApplyToModelService(previousModelConfig);
+            if (_modelConfigStore is null || previousModelConfig is null || _modelProfileStore is null
+                || _modelProfiles is null || _videoProfiles is null)
+                throw new InvalidOperationException("模型档案尚未初始化");
+            var selectedText = _modelProfiles.Resolve(candidate.SelectedTextProfileId);
+            if (!string.Equals(editedVideoProfile.Id, candidate.SelectedVideoProfileId, StringComparison.Ordinal))
+                throw new InvalidOperationException("编辑的视频档案与当前选择不一致。");
+            var candidateVideoProfiles = _videoProfiles.AddOrReplace(editedVideoProfile);
+            var selectedVideo = candidateVideoProfiles.Resolve(candidate.SelectedVideoProfileId);
+            var videoErrors = selectedVideo.Capabilities.Validate(candidate.VideoGeneration);
+            if (videoErrors.Count > 0) throw new ArgumentException(string.Join("；", videoErrors), nameof(candidate));
+            var candidateModelConfig = candidate.ApplyToModelService(selectedText.Service);
+            var candidateProfiles = _modelProfiles.Replace(selectedText with { Service = candidateModelConfig });
+            _modelProfileStore.Save(candidateProfiles);
             _modelConfigStore.Save(candidateModelConfig);
+            _videoProfileStore!.Save(candidateVideoProfiles);
             _settingsStore.Save(candidate);
             _settings = candidate;
             _modelConfig = candidateModelConfig;
+            _modelProfiles = candidateProfiles;
+            _videoProfiles = candidateVideoProfiles;
+            var videoProfileChanged = !string.Equals(previous.SelectedVideoProfileId, candidate.SelectedVideoProfileId, StringComparison.Ordinal);
+            var previousVideoProfile = previousVideoProfiles!.Resolve(previous.SelectedVideoProfileId);
+            var videoProfileEdited = previousVideoProfile != editedVideoProfile;
+            if (videoProfileChanged || videoProfileEdited)
+                await VideoPanel.ResetProfileAsync(stopModel: VideoPanel.HasInitializedRuntime);
+            VideoPanel.RefreshPresetSummary();
+            TextModelSummaryText.Text = $"{selectedText.DisplayName}  {candidateModelConfig.BindHost}:{candidateModelConfig.Port}";
+            ChatComposerMetaText.Text = FormatTextComposerMeta(candidate);
+            VideoModelSummaryText.Text = $"{selectedVideo.DisplayName}  {selectedVideo.Service.BindHost}:{selectedVideo.Service.Port}";
             ApplySessionSortMode(candidate.ResolveSessionSortMode());
             // Long-form toggles affect the continue / next-segment button immediately.
             if (!candidate.SegmentedLongForm)
@@ -415,6 +613,8 @@ public sealed partial class MainPage : Page
                     {
                         _settings = previous;
                         _modelConfig = previousModelConfig;
+                        _modelProfiles = previousProfiles;
+                        if (previousProfiles is not null) _modelProfileStore.Save(previousProfiles);
                         _modelConfigStore.Save(previousModelConfig);
                         _settingsStore.Save(previous);
                         return Task.CompletedTask;
@@ -455,9 +655,19 @@ public sealed partial class MainPage : Page
         {
             _settings = previous;
             _modelConfig = previousModelConfig;
+            _modelProfiles = previousProfiles;
+            _videoProfiles = previousVideoProfiles;
+            if (previousProfiles is not null && _modelProfileStore is not null)
+            {
+                try { _modelProfileStore.Save(previousProfiles); } catch { }
+            }
             if (previousModelConfig is not null && _modelConfigStore is not null)
             {
                 try { _modelConfigStore.Save(previousModelConfig); } catch { }
+            }
+            if (previousVideoProfiles is not null && _videoProfileStore is not null)
+            {
+                try { _videoProfileStore.Save(previousVideoProfiles); } catch { }
             }
             try { _settingsStore.Save(previous); } catch { }
             if (error is ModelRestartException restartError)
@@ -477,9 +687,9 @@ public sealed partial class MainPage : Page
         if (_modelManager is null) return;
         try
         {
-            SetStatus(QwenStatusText, "• 模型检查中", WarningText);
+            UpdateTextModelStatus(ModelLifecycleState.Starting);
             var availability = await _modelManager.EnsureAvailableAsync();
-            SetStatus(QwenStatusText, availability.Reused ? "• 模型已复用" : "• 模型已启动", PrimaryText);
+            UpdateTextModelStatus(availability.Reused ? ModelLifecycleState.Reused : ModelLifecycleState.Ready);
             SetNotice($"模型只监听 127.0.0.1:{_activeModelSettings.Port}。", MutedText);
             // Lifecycle notice: dedupe + not persisted (avoids duplicate rows after session restore).
             AppendSystem(availability.Reused
@@ -490,10 +700,200 @@ public sealed partial class MainPage : Page
         }
         catch (Exception error)
         {
-            if (throwOnFailure) throw;
-            SetStatus(QwenStatusText, "× 模型不可用", ErrorText);
+            UpdateTextModelStatus(ModelLifecycleState.Failed, error.Message);
             SetNotice($"模型启动失败：{error.Message}", ErrorText);
+            if (throwOnFailure) throw;
         }
+    }
+
+    private async Task RestoreInterruptedVideoWorkAsync()
+    {
+        try
+        {
+            await VideoPanel.RestoreInterruptedWorkAsync();
+        }
+        catch (Exception error)
+        {
+            SetNotice($"恢复视频任务失败：{error.Message}", ErrorText);
+        }
+    }
+
+    private async Task ApplyStartupModelSelectionAsync()
+    {
+        var plan = StartupModelPlan.Resolve(_settings.StartupModel);
+        switch (plan.Mode)
+        {
+            case StartupModelSelection.Video:
+                ModeSelector.SelectedItem = VideoModeItem;
+                if (plan.StartVideoModel) await StartVideoModelAsync();
+                break;
+            case StartupModelSelection.None:
+                if (plan.ChatNotice is not null) SetNotice(plan.ChatNotice, MutedText);
+                if (_modelManager is not null && await _modelManager.IsHealthyAsync())
+                    UpdateTextModelStatus(ModelLifecycleState.Reused);
+                await VideoPanel.RefreshModelStatusAsync();
+                break;
+            default:
+                ModeSelector.SelectedItem = ChatModeItem;
+                if (plan.ChatNotice is not null) SetNotice(plan.ChatNotice, WarningText);
+                if (plan.StartTextModel) await StartTextModelAsync();
+                break;
+        }
+    }
+
+    private async Task PrepareForVideoAsync(CancellationToken cancellationToken)
+    {
+        var hanhuaBusy = HanhuaArbitration.RefuseVideo(HanhuaPanel.IsBusy);
+        if (hanhuaBusy is not null)
+            throw new InvalidOperationException(hanhuaBusy);
+        if (_generations.Count > 0)
+            throw new InvalidOperationException("仍有聊天回复正在生成，请先在对应会话停止后再生成视频。");
+        if (_modelManager is null || !_settings.EnforceTextVideoModelExclusivity) return;
+
+        SetStatus(QwenStatusText, "• 正在释放聊天模型", WarningText);
+        await _modelManager.StopServiceAsync(cancellationToken);
+        if (await _modelManager.IsHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("聊天服务仍在占用本地端口；为避免显存冲突，已拒绝启动视频模型。");
+        UpdateTextModelStatus(ModelLifecycleState.Released);
+    }
+
+    private FolderPicker CreateModelFolderPicker(string commitButtonText)
+    {
+        if (App.Window is not MainWindow window)
+            throw new InvalidOperationException("无法取得 Local AI 主窗口，目录选择器未打开。");
+        return new FolderPicker(window.AppWindowId) { CommitButtonText = commitButtonText };
+    }
+
+    private async Task ImportTextModelAsync()
+    {
+        if (_paths is null || _modelProfileStore is null || _modelProfiles is null || SettingsPanel.CurrentTextProfile is not { } template)
+            return;
+        SettingsPanel.SetModelOperationStatus(video: false, "正在选择本地目录…", busy: true);
+        SetNotice("正在打开文本模型目录选择器…", WarningText);
+        try
+        {
+            var picker = CreateModelFolderPicker("导入唯一 GGUF");
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is null)
+            {
+                SettingsPanel.SetModelOperationStatus(false, "已取消目录选择。", false);
+                SetNotice("已取消文本模型目录选择。", MutedText);
+                return;
+            }
+            var imported = TextModelProfileImport.CreateProfile(_modelProfiles, template, TextModelProfileImport.FindSingleGguf(folder.Path));
+            _modelProfiles = _modelProfiles.AddOrReplace(imported);
+            _modelProfileStore.Save(_modelProfiles);
+            if (_modelManager is not null) await _modelManager.StopServiceAsync();
+            _modelConfig = imported.Service;
+            _modelConfigStore?.Save(_modelConfig);
+            _settings = _settings with { SelectedTextProfileId = imported.Id };
+            _settingsStore?.Save(_settings);
+            CreateModelClients(_settings);
+            SettingsPanel.RefreshTextProfiles(_modelProfiles, imported.Id);
+            SettingsPanel.SetModelOperationStatus(false, $"已导入 {imported.DisplayName}。", false);
+            SetNotice($"已导入文本模型：{imported.DisplayName}。", MutedText);
+        }
+        catch (Exception error)
+        {
+            SettingsPanel.SetModelOperationStatus(false, $"未导入：{error.Message}", false);
+            SetNotice($"文本模型目录选择失败：{error.Message}", ErrorText);
+        }
+    }
+
+    private async Task ImportVideoModelAsync()
+    {
+        if (_videoProfileStore is null || _videoProfiles is null || _settingsStore is null || SettingsPanel.CurrentVideoProfile is not { } template)
+            return;
+        SettingsPanel.SetModelOperationStatus(video: true, "正在选择 ComfyUI 根目录…", busy: true);
+        SetNotice("正在打开视频模型目录选择器…", WarningText);
+        try
+        {
+            var picker = CreateModelFolderPicker("导入兼容视频模型");
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is null) { SettingsPanel.SetModelOperationStatus(true, "已取消目录选择。", false); SetNotice("已取消视频模型目录选择。", MutedText); return; }
+            var imported = VideoModelProfileImport.CreateCompatibleProfile(_videoProfiles, template, folder.Path);
+            await VideoPanel.ResetProfileAsync(stopModel: true);
+            _videoProfiles = _videoProfiles.AddOrReplace(imported);
+            _videoProfileStore.Save(_videoProfiles);
+            _settings = _settings with { SelectedVideoProfileId = imported.Id };
+            _settingsStore.Save(_settings);
+            SettingsPanel.RefreshVideoProfiles(_videoProfiles, imported.Id);
+            VideoPanel.RefreshPresetSummary();
+            VideoModelSummaryText.Text = $"{imported.DisplayName}  {imported.Service.BindHost}:{imported.Service.Port}";
+            SettingsPanel.SetModelOperationStatus(true, $"已导入 {imported.DisplayName}；沿用所选档案的兼容工作流，首次生成前会校验节点。", false);
+            SetNotice($"已导入视频模型：{imported.DisplayName}。", MutedText);
+        }
+        catch (Exception error) { SettingsPanel.SetModelOperationStatus(true, $"未导入：{error.Message}", false); SetNotice($"视频模型目录选择失败：{error.Message}", ErrorText); }
+    }
+
+    private async Task StartTextModelAsync()
+    {
+        if (HanhuaPanel.IsBusy)
+        {
+            SetNotice("汉化正在占用 GPU，请等它结束或取消后再启动文本模型。", WarningText);
+            return;
+        }
+        UpdateTextModelStatus(ModelLifecycleState.Starting);
+        try { if (_settings.EnforceTextVideoModelExclusivity) await VideoPanel.ReleaseModelAsync(); await InitializeModelAsync(throwOnFailure: true); }
+        catch { }
+    }
+
+    private async Task ReleaseTextModelAsync()
+    {
+        UpdateTextModelStatus(ModelLifecycleState.Starting, "正在释放");
+        try { if (_modelManager is not null) await _modelManager.StopServiceAsync(); _lastModelSessionId = null; UpdateTextModelStatus(ModelLifecycleState.Released); }
+        catch (Exception error) { UpdateTextModelStatus(ModelLifecycleState.Failed, $"释放失败：{error.Message}"); }
+    }
+
+    private async Task StartVideoModelAsync()
+    {
+        try { await VideoPanel.StartModelAsync(); }
+        catch (Exception error) { SetNotice($"视频模型启动失败：{error.Message}", ErrorText); }
+    }
+
+    private async Task ReleaseVideoModelAsync()
+    {
+        try { await VideoPanel.ReleaseModelAsync(); }
+        catch (Exception error) { UpdateVideoModelStatus(new(ModelLifecycleState.Failed, $"释放失败：{error.Message}")); }
+    }
+
+    private async void StartTextModelPageButton_Click(object sender, RoutedEventArgs e) => await StartTextModelAsync();
+
+    private async void StartVideoModelPageButton_Click(object sender, RoutedEventArgs e) => await StartVideoModelAsync();
+
+    private void UpdateTextModelStatus(ModelLifecycleState state, string? detail = null)
+    {
+        var (text, color, busy, ready) = state switch
+        {
+            ModelLifecycleState.Starting when detail == "正在释放" => ("• 聊天模型正在释放", WarningText, true, false),
+            ModelLifecycleState.Starting => ("• 聊天模型正在启动", WarningText, true, false),
+            ModelLifecycleState.Ready => ("• 聊天模型已启动", PrimaryText, false, true),
+            ModelLifecycleState.Reused => ("• 聊天模型已复用", PrimaryText, false, true),
+            ModelLifecycleState.Failed => ("× 聊天模型启动失败", ErrorText, false, false),
+            ModelLifecycleState.Released => ("○ 聊天模型已释放", MutedText, false, false),
+            _ => ("○ 聊天模型未启动", MutedText, false, false),
+        };
+        SetStatus(QwenStatusText, text, color);
+        StartTextModelPageButton.Content = busy ? "启动中" : ready ? "已启动" : state == ModelLifecycleState.Failed ? "重试" : "启动";
+        StartTextModelPageButton.IsEnabled = !busy && !ready && !HanhuaPanel.IsBusy;
+        SettingsPanel.SetModelOperationStatus(false, detail is null ? text.TrimStart('•', '×', '○', ' ') : $"{text.TrimStart('•', '×', '○', ' ')}：{detail}", busy);
+    }
+
+    private void UpdateVideoModelStatus(ModelLifecycleUpdate update)
+    {
+        var (text, color, busy, ready) = update.State switch
+        {
+            ModelLifecycleState.Starting => ("• 视频模型正在启动", WarningText, true, false),
+            ModelLifecycleState.Ready => ("• 视频模型已启动", PrimaryText, false, true),
+            ModelLifecycleState.Reused => ("• 视频模型已复用", PrimaryText, false, true),
+            ModelLifecycleState.Failed => ("× 视频模型启动失败", ErrorText, false, false),
+            ModelLifecycleState.Released => ("○ 视频模型已释放", MutedText, false, false),
+            _ => ("○ 视频模型未启动", MutedText, false, false),
+        };
+        SetStatus(VideoModelStatusText, text, color);
+        StartVideoModelPageButton.Content = busy ? "启动中" : ready ? "已启动" : update.State == ModelLifecycleState.Failed ? "重试" : "启动";
+        StartVideoModelPageButton.IsEnabled = !busy && !ready;
+        SettingsPanel.SetModelOperationStatus(true, update.Detail is null ? text.TrimStart('•', '×', '○', ' ') : $"{text.TrimStart('•', '×', '○', ' ')}：{update.Detail}", busy);
     }
 
     private async void SendButton_Click(object sender, RoutedEventArgs e)
@@ -504,6 +904,9 @@ public sealed partial class MainPage : Page
             SetNotice("正在停止当前会话的生成…", WarningText);
             return;
         }
+
+        if (CancelActiveChatQueue())
+            return;
 
         await SendAsync();
     }
@@ -534,17 +937,18 @@ public sealed partial class MainPage : Page
 
     private async void InputBox_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (sender is not TextBox input) return;
         var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
             .HasFlag(CoreVirtualKeyStates.Down);
 
-        if (!shift && (e.Key == VirtualKey.Up || e.Key == VirtualKey.Down) && !InputBox.Text.Contains('\n'))
+        if (!shift && (e.Key == VirtualKey.Up || e.Key == VirtualKey.Down) && !input.Text.Contains('\n'))
         {
             e.Handled = true;
             var recalled = e.Key == VirtualKey.Up
-                ? _inputHistory.Previous(InputBox.Text)
-                : _inputHistory.Next(InputBox.Text);
-            InputBox.Text = recalled;
-            InputBox.SelectionStart = InputBox.Text.Length;
+                ? _inputHistory.Previous(input.Text)
+                : _inputHistory.Next(input.Text);
+            input.Text = recalled;
+            input.SelectionStart = input.Text.Length;
             return;
         }
 
@@ -557,6 +961,226 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void UpdateChatComposerLayout()
+        => ComposerTextBoxLayout.Apply(InputBox, ActualHeight);
+
+    private void ExpandChatInputButton_Click(object sender, RoutedEventArgs e)
+        => ShowExpandedEditor(ExpandedEditorMode.Chat, "展开编辑聊天消息", InputBox.Text, "发送");
+
+    private void ShowVideoExpandedText(string title, string text, bool readOnly)
+        => ShowExpandedEditor(readOnly ? ExpandedEditorMode.ReadOnly : ExpandedEditorMode.Video, title, text, readOnly ? "关闭" : "生成视频");
+
+    private void ShowExpandedEditor(ExpandedEditorMode mode, string title, string text, string actionLabel)
+    {
+        _expandedEditorMode = mode;
+        ExpandedEditorTitle.Text = title;
+        ExpandedEditorText.Text = text;
+        ExpandedEditorText.IsReadOnly = mode == ExpandedEditorMode.ReadOnly;
+        ExpandedEditorHint.Text = mode == ExpandedEditorMode.ReadOnly
+            ? "完整内容可选择，也可以复制到剪贴板"
+            : mode == ExpandedEditorMode.Chat
+                ? "Enter 发送    Shift+Enter 换行"
+                : "Enter 生成    Shift+Enter 换行    输入 @ 插入参考标签";
+        ExpandedEditorCopyButton.Visibility = mode == ExpandedEditorMode.ReadOnly ? Visibility.Visible : Visibility.Collapsed;
+        ExpandedEditorCloseButton.Content = mode == ExpandedEditorMode.ReadOnly ? "关闭" : "收起";
+        ExpandedEditorActionButton.Content = actionLabel;
+        ExpandedEditorActionButton.Visibility = mode == ExpandedEditorMode.ReadOnly ? Visibility.Collapsed : Visibility.Visible;
+        if (ExpandedInsertTemplateButton is not null)
+            ExpandedInsertTemplateButton.Visibility =
+                mode == ExpandedEditorMode.Video && VideoPanel.CanInsertPromptTemplate
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        if (ExpandedTemplatePicker is not null)
+            ExpandedTemplatePicker.Visibility = Visibility.Collapsed;
+        HideExpandedMentions();
+        ExpandedEditorOverlay.Visibility = Visibility.Visible;
+        ExpandedEditorOverlay.IsHitTestVisible = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            ExpandedEditorText.SelectionStart = ExpandedEditorText.Text.Length;
+            ExpandedEditorText.Focus(FocusState.Programmatic);
+        });
+    }
+
+    private void CloseExpandedEditorButton_Click(object sender, RoutedEventArgs e)
+        => CloseExpandedEditor(commitText: true);
+
+    private void CloseExpandedEditor(bool commitText)
+    {
+        if (commitText)
+        {
+            if (_expandedEditorMode == ExpandedEditorMode.Chat) InputBox.Text = ExpandedEditorText.Text;
+            else if (_expandedEditorMode == ExpandedEditorMode.Video) VideoPanel.ApplyExpandedPrompt(ExpandedEditorText.Text);
+        }
+        HideExpandedMentions();
+        ExpandedEditorOverlay.Visibility = Visibility.Collapsed;
+        ExpandedEditorOverlay.IsHitTestVisible = false;
+        if (_expandedEditorMode == ExpandedEditorMode.Chat) InputBox.Focus(FocusState.Programmatic);
+    }
+
+    private async void ExpandedEditorActionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_expandedEditorMode == ExpandedEditorMode.ReadOnly) { CloseExpandedEditor(commitText: false); return; }
+        var mode = _expandedEditorMode;
+        var text = ExpandedEditorText.Text;
+        CloseExpandedEditor(commitText: true);
+        if (mode == ExpandedEditorMode.Chat) await SendAsync();
+        else await VideoPanel.GenerateFromExpandedPromptAsync(text);
+    }
+
+    private async void ExpandedEditorText_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_expandedEditorMode == ExpandedEditorMode.ReadOnly) return;
+        if (_expandedEditorMode == ExpandedEditorMode.Video && IsExpandedMentionListOpen())
+        {
+            if (e.Key == VirtualKey.Escape)
+            {
+                e.Handled = true;
+                HideExpandedMentions();
+                return;
+            }
+            if (e.Key is VirtualKey.Down or VirtualKey.Up)
+            {
+                e.Handled = true;
+                MoveExpandedMentionSelection(e.Key == VirtualKey.Down ? 1 : -1);
+                return;
+            }
+            if (e.Key is VirtualKey.Enter or VirtualKey.Tab)
+            {
+                e.Handled = true;
+                InsertSelectedExpandedMention();
+                return;
+            }
+        }
+        var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift).HasFlag(CoreVirtualKeyStates.Down);
+        if (ChatInteractionPolicy.ResolveEnter(e.Key == VirtualKey.Enter, shift) != ComposerKeyAction.Send) return;
+        e.Handled = true;
+        var mode = _expandedEditorMode;
+        var text = ExpandedEditorText.Text;
+        CloseExpandedEditor(commitText: true);
+        if (mode == ExpandedEditorMode.Chat) await SendAsync();
+        else await VideoPanel.GenerateFromExpandedPromptAsync(text);
+    }
+
+    private bool IsExpandedMentionListOpen()
+        => ExpandedMentionList is not null && ExpandedMentionList.Visibility == Visibility.Visible;
+
+    private void UpdateExpandedMentions()
+    {
+        if (ExpandedMentionList is null || ExpandedEditorText is null) return;
+        if (_expandedEditorMode != ExpandedEditorMode.Video)
+        {
+            HideExpandedMentions();
+            return;
+        }
+
+        var candidates = VideoPanel.MentionCandidates();
+        var text = ExpandedEditorText.Text ?? "";
+        var caret = ExpandedEditorText.SelectionStart;
+        if (candidates.Count == 0
+            || !VideoPromptMentions.TryGetActiveQuery(text, caret, out _, out var query))
+        {
+            HideExpandedMentions();
+            return;
+        }
+
+        var filtered = VideoPromptMentions.Filter(candidates, query);
+        if (filtered.Count == 0)
+        {
+            HideExpandedMentions();
+            return;
+        }
+
+        ExpandedMentionList.ItemsSource = filtered.ToArray();
+        if (ExpandedMentionList.SelectedIndex < 0)
+            ExpandedMentionList.SelectedIndex = 0;
+        ExpandedMentionList.Visibility = Visibility.Visible;
+    }
+
+    private void HideExpandedMentions()
+    {
+        if (ExpandedMentionList is null) return;
+        ExpandedMentionList.Visibility = Visibility.Collapsed;
+    }
+
+    private void MoveExpandedMentionSelection(int delta)
+    {
+        if (ExpandedMentionList.Items.Count == 0) return;
+        var next = ExpandedMentionList.SelectedIndex + delta;
+        if (next < 0) next = ExpandedMentionList.Items.Count - 1;
+        if (next >= ExpandedMentionList.Items.Count) next = 0;
+        ExpandedMentionList.SelectedIndex = next;
+        if (ExpandedMentionList.SelectedItem is not null)
+            ExpandedMentionList.ScrollIntoView(ExpandedMentionList.SelectedItem);
+    }
+
+    private void ExpandedMentionList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is VideoPromptMention item)
+            InsertExpandedMention(item.Tag);
+    }
+
+    private void InsertSelectedExpandedMention()
+    {
+        var item = ExpandedMentionList.SelectedItem as VideoPromptMention
+                   ?? ExpandedMentionList.Items.OfType<VideoPromptMention>().FirstOrDefault();
+        if (item is not null)
+            InsertExpandedMention(item.Tag);
+    }
+
+    private void InsertExpandedMention(string tag)
+    {
+        var text = ExpandedEditorText.Text ?? "";
+        var caret = ExpandedEditorText.SelectionStart;
+        if (!VideoPromptMentions.TryGetActiveQuery(text, caret, out var atIndex, out _))
+        {
+            HideExpandedMentions();
+            return;
+        }
+
+        var next = VideoPromptMentions.Insert(text, atIndex, caret, tag, out var newCaret);
+        ExpandedEditorText.Text = next;
+        ExpandedEditorText.SelectionStart = newCaret;
+        HideExpandedMentions();
+        ExpandedEditorText.Focus(FocusState.Programmatic);
+    }
+
+    private void ExpandedInsertTemplateButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ExpandedTemplatePicker is null) return;
+        if (ExpandedTemplatePicker.Visibility == Visibility.Visible)
+        {
+            ExpandedTemplatePicker.Visibility = Visibility.Collapsed;
+            return;
+        }
+        ExpandedTemplatePicker.Refresh(
+            VideoPanel.CurrentConditioningMode,
+            VideoPanel.CurrentTemplateMedia());
+        ExpandedTemplatePicker.Visibility = Visibility.Visible;
+    }
+
+    private void ExpandedTemplatePicker_InsertRequested(object sender, VideoPromptTemplateInsert insert)
+    {
+        VideoPanel.ApplyPromptTemplate(insert.Title, insert.Text, ExpandedEditorText.Text);
+        ExpandedEditorText.Text = VideoPanel.ComposerText;
+        if (ExpandedTemplatePicker is not null)
+            ExpandedTemplatePicker.Visibility = Visibility.Collapsed;
+    }
+
+    private void ExpandedTemplatePicker_Cancelled(object sender, EventArgs e)
+    {
+        if (ExpandedTemplatePicker is not null)
+            ExpandedTemplatePicker.Visibility = Visibility.Collapsed;
+    }
+
+    private void ExpandedEditorCopyButton_Click(object sender, RoutedEventArgs e)
+    {
+        var package = new DataPackage();
+        package.SetText(ExpandedEditorText.Text);
+        Clipboard.SetContent(package);
+        Clipboard.Flush();
+    }
+
     private bool IsActiveSessionGenerating()
         => ActiveGeneration is not null;
 
@@ -567,23 +1191,28 @@ public sealed partial class MainPage : Page
         string? forcedUserMessage = null,
         string? displayUserLabel = null,
         bool isContinuation = false,
-        bool isSegmentContinue = false)
+        bool isSegmentContinue = false,
+        bool skipAttachments = false)
     {
         if (_modelManager is null || _chatClient is null) return;
+
+        var hanhuaBusy = HanhuaArbitration.RefuseChat(HanhuaPanel.IsBusy);
+        if (hanhuaBusy is not null)
+        {
+            SetNotice(hanhuaBusy, WarningText);
+            return;
+        }
+
+        if (VideoPanel.IsGenerating)
+        {
+            SetNotice("视频仍在生成；请先等待完成或取消视频任务。", WarningText);
+            return;
+        }
 
         var owner = _sessions.Active;
         if (FindGeneration(owner.Id) is not null)
         {
             SetNotice("当前会话仍在生成中，请先点「停止」或等完成后再发。", WarningText);
-            return;
-        }
-
-        if (_generations.Count >= MaxParallelGenerations)
-        {
-            var titles = string.Join("、", _generations.Values.Select(g => g.Session.Title));
-            SetNotice(
-                $"已有 {_generations.Count} 路生成在跑（并发槽位 {MaxParallelGenerations}）：{titles}。请等其一完成，或到对应会话点「停止」。",
-                WarningText);
             return;
         }
 
@@ -637,9 +1266,33 @@ public sealed partial class MainPage : Page
         }
         else
         {
-            userMessage = forcedUserMessage ?? submittedInput.Trim();
-            if (userMessage.Length == 0) return;
-            visibleUserText = displayUserLabel ?? userMessage;
+            var prompt = forcedUserMessage ?? submittedInput.Trim();
+            if (skipAttachments)
+            {
+                userMessage = prompt;
+                visibleUserText = displayUserLabel ?? prompt;
+            }
+            else
+            {
+                var loaded = ChatAttachmentComposer.Load(_attachmentPaths, CurrentAttachmentPolicy());
+                if (loaded.Errors.Count > 0)
+                    SetNotice(string.Join(" ", loaded.Errors), WarningText);
+                userMessage = ChatAttachmentComposer.BuildModelMessage(prompt, loaded.Attachments);
+                if (userMessage.Length == 0)
+                {
+                    if (loaded.Errors.Count == 0)
+                        SetNotice("请输入消息，或添加可读的文本附件。", WarningText);
+                    return;
+                }
+                visibleUserText = displayUserLabel ?? ChatAttachmentComposer.BuildVisibleMessage(prompt, loaded.Attachments);
+                _attachmentPaths.Clear();
+                RebuildChatAttachmentChips();
+            }
+            if (userMessage.Length == 0)
+            {
+                SetNotice("请输入消息，或添加可读的文本附件。", WarningText);
+                return;
+            }
             requestHistory = _history.Select(m => new ChatMessage(m.Role, m.Content)).ToList();
 
             // New user turn replaces any unfinished long-form plan.
@@ -666,24 +1319,51 @@ public sealed partial class MainPage : Page
             }
         }
 
+        var turn = new ChatQueuedTurn(
+            owner.Id,
+            userMessage,
+            visibleUserText,
+            submittedInput,
+            isContinuation && !isSegmentContinue,
+            isSegmentTurn,
+            !(isContinuation && !isSegmentContinue) && UseMemosToggle.IsOn,
+            SaveLogsToggle.IsOn,
+            owner.MemosSessionId,
+            requestHistory,
+            requestedMax,
+            RestoreInputOnCancel: !isContinuation && !isSegmentContinue && forcedUserMessage is null);
+
+        if (_generations.Count >= MaxParallelGenerations)
+        {
+            EnqueueActiveChatTurn(turn);
+            if (turn.RestoreInputOnCancel)
+                InputBox.Text = string.Empty;
+            return;
+        }
+
+        if (turn.RestoreInputOnCancel)
+            InputBox.Text = string.Empty;
+        await RunChatTurnAsync(turn, owner);
+    }
+
+    private async Task RunChatTurnAsync(ChatQueuedTurn turn, ConversationSession owner)
+    {
         // Snapshot history/session before any await so a later session switch cannot re-route this job.
         var gen = new SessionGeneration
         {
-            SessionId = owner.Id,
+            SessionId = turn.SessionId,
             Session = owner,
-            UserMessage = userMessage,
-            VisibleUserText = visibleUserText,
-            IsContinuation = isContinuation && !isSegmentContinue,
-            IsSegmentTurn = isSegmentTurn,
-            UseMemos = !(isContinuation && !isSegmentContinue) && UseMemosToggle.IsOn,
-            SaveLog = SaveLogsToggle.IsOn,
-            MemosSessionId = owner.MemosSessionId,
-            RequestHistory = requestHistory,
-            RequestedMaxOutputTokens = requestedMax,
+            UserMessage = turn.UserMessage,
+            VisibleUserText = turn.VisibleUserText,
+            IsContinuation = turn.IsContinuation,
+            IsSegmentTurn = turn.IsSegmentTurn,
+            UseMemos = turn.UseMemos,
+            SaveLog = turn.SaveLog,
+            MemosSessionId = turn.MemosSessionId,
+            RequestHistory = turn.RequestHistory.ToList(),
+            RequestedMaxOutputTokens = turn.RequestedMaxOutputTokens,
         };
 
-        if (!gen.IsContinuation && !isSegmentContinue && forcedUserMessage is null)
-            InputBox.Text = string.Empty;
         var sendToken = gen.Cts.Token;
         _generations[gen.SessionId] = gen;
         RefreshComposerBusyState();
@@ -711,10 +1391,28 @@ public sealed partial class MainPage : Page
         try
         {
             if (IsViewingSession(gen.SessionId))
-                SetStatus(QwenStatusText, "• 模型检查中", WarningText);
-            await _modelManager.EnsureAvailableAsync(sendToken);
+                UpdateTextModelStatus(ModelLifecycleState.Starting);
+            if (_settings.EnforceTextVideoModelExclusivity)
+                await VideoPanel.ReleaseModelAsync(sendToken);
+            try
+            {
+                await _modelManager.EnsureAvailableAsync(sendToken);
+            }
+            catch (Exception error)
+            {
+                if (IsViewingSession(gen.SessionId)) UpdateTextModelStatus(ModelLifecycleState.Failed, error.Message);
+                throw;
+            }
             if (IsViewingSession(gen.SessionId))
-                SetStatus(QwenStatusText, _modelManager.OwnsModel ? "• 模型已启动" : "• 模型已复用", PrimaryText);
+                UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+
+            var resetServerCache = ModelSessionCache.ShouldReset(
+                _lastModelSessionId, gen.SessionId, _generations.Count);
+            if (resetServerCache)
+            {
+                try { await _modelManager.EraseIdleSlotsAsync(sendToken); }
+                catch (Exception) { /* older llama-server builds may lack /slots */ }
+            }
 
             string? memoryContext = null;
             MemosStdioClient? memoryClient = null;
@@ -725,7 +1423,7 @@ public sealed partial class MainPage : Page
                     if (IsViewingSession(gen.SessionId))
                         SetStatus(MemosStatusText, "• 记忆召回中", WarningText);
                     memoryClient = await EnsureMemosAsync();
-                    memoryContext = await memoryClient.RecallAsync(userMessage, _settings.MemosTopK, sendToken);
+                    memoryContext = await memoryClient.RecallAsync(gen.UserMessage, _settings.MemosTopK, sendToken);
                     if (IsViewingSession(gen.SessionId))
                         SetStatus(MemosStatusText, "• 记忆已开启", PrimaryText);
                 }
@@ -777,7 +1475,13 @@ public sealed partial class MainPage : Page
                 _activeModelSettings.ModelAlias,
                 maxOutputTokens,
                 enableThinking: gen.IsContinuation ? false : null,
-                reasoningEnabled: _activeModelSettings.ReasoningEnabled && !gen.IsContinuation);
+                reasoningEnabled: _activeModelSettings.ReasoningEnabled && !gen.IsContinuation)
+                with
+                {
+                    SlotId = 0,
+                    CachePrompt = !resetServerCache,
+                };
+            _lastModelSessionId = gen.SessionId;
 
             var previousAssistant = gen.IsContinuation ? gen.RequestHistory[^1].Content : string.Empty;
 
@@ -785,8 +1489,8 @@ public sealed partial class MainPage : Page
             {
                 if (gen.IsContinuation)
                 {
-                    // Extend the existing Qwen bubble — do not invent a fake user turn.
-                    replyEntry = TranscriptItems.LastOrDefault(item => item.Label == "Qwen");
+                    // Extend the existing assistant bubble — do not invent a fake user turn.
+                    replyEntry = TranscriptItems.LastOrDefault(item => TranscriptPresentationPolicy.IsAssistant(item.Label));
                     if (replyEntry is not null)
                     {
                         replyEntry.ResumeStreaming(previousAssistant);
@@ -795,7 +1499,7 @@ public sealed partial class MainPage : Page
                     }
                     else
                     {
-                        replyEntry = AppendTurn("Qwen", previousAssistant, PrimaryText, isStreaming: true);
+                        replyEntry = AppendTurn(TranscriptPresentationPolicy.AssistantLabel, previousAssistant, PrimaryText, isStreaming: true);
                         gen.ReplyEntry = replyEntry;
                     }
                 }
@@ -811,7 +1515,7 @@ public sealed partial class MainPage : Page
             {
                 if (IsViewingSession(gen.SessionId) && !gen.IsContinuation)
                 {
-                    replyEntry = AppendTurn("Qwen", string.Empty, PrimaryText, isStreaming: true);
+                    replyEntry = AppendTurn(TranscriptPresentationPolicy.AssistantLabel, string.Empty, PrimaryText, isStreaming: true);
                     gen.ReplyEntry = replyEntry;
                     if (submittedEntry is not null)
                         ScrollTranscriptToQuestion(submittedEntry);
@@ -881,7 +1585,7 @@ public sealed partial class MainPage : Page
                 {
                     if (gen.IsContinuation)
                     {
-                        var live = gen.ReplyEntry ?? TranscriptItems.LastOrDefault(item => item.Label == "Qwen");
+                        var live = gen.ReplyEntry ?? TranscriptItems.LastOrDefault(item => TranscriptPresentationPolicy.IsAssistant(item.Label));
                         live?.Complete(finalBody);
                         gen.ReplyEntry = live;
                         if (live is not null)
@@ -889,7 +1593,7 @@ public sealed partial class MainPage : Page
                     }
                     else
                     {
-                        replyEntry = AppendTurn("Qwen", finalBody, PrimaryText);
+                        replyEntry = AppendTurn(TranscriptPresentationPolicy.AssistantLabel, finalBody, PrimaryText);
                         gen.ReplyEntry = replyEntry;
                         var question = gen.SubmittedEntry ?? submittedEntry;
                         if (question is not null)
@@ -904,16 +1608,16 @@ public sealed partial class MainPage : Page
         {
             CommitGenerationCancelled(
                 gen,
-                submittedInput,
-                restoreInput: !gen.IsContinuation && forcedUserMessage is null);
+                turn.SubmittedInput,
+                restoreInput: turn.RestoreInputOnCancel);
         }
         catch (Exception error)
         {
             CommitGenerationFailed(
                 gen,
                 error,
-                submittedInput,
-                restoreInput: !gen.IsContinuation && forcedUserMessage is null);
+                turn.SubmittedInput,
+                restoreInput: turn.RestoreInputOnCancel);
         }
         finally
         {
@@ -924,11 +1628,57 @@ public sealed partial class MainPage : Page
             UpdateMemosStatus();
             UpdateContinueButtonState();
             RefreshSessionPicker();
+            await StartNextChatQueuedAsync();
         }
     }
 
+    private void EnqueueActiveChatTurn(ChatQueuedTurn turn)
+    {
+        var position = _chatQueue.Enqueue(turn);
+        var status = SessionJobQueue<ChatQueuedTurn>.FormatStatus(position);
+        SetNotice(status, MutedText);
+        if (IsViewingSession(turn.SessionId))
+            AppendSystem(status, dedupeIdentical: true);
+        CaptureActiveSession();
+        PersistSessions();
+        RefreshComposerBusyState();
+        RefreshSessionPicker();
+    }
+
+    private bool CancelActiveChatQueue()
+    {
+        if (!_chatQueue.Remove(_sessions.Active.Id)) return false;
+        SetNotice("已取消排队。", MutedText);
+        RefreshQueuedChatNotices();
+        RefreshComposerBusyState();
+        return true;
+    }
+
+    private void RefreshQueuedChatNotices()
+    {
+        var position = _chatQueue.Position(_sessions.Active.Id);
+        if (position is int place)
+            SetNotice(SessionJobQueue<ChatQueuedTurn>.FormatStatus(place), MutedText);
+    }
+
+    private async Task StartNextChatQueuedAsync()
+    {
+        if (!_drainChatQueue || _generations.Count >= MaxParallelGenerations) return;
+        if (VideoPanel.IsGenerating) return;
+        var next = _chatQueue.Dequeue();
+        if (next is null) return;
+        var session = _sessions.Find(next.SessionId);
+        if (session is null)
+        {
+            await StartNextChatQueuedAsync();
+            return;
+        }
+        RefreshQueuedChatNotices();
+        await RunChatTurnAsync(next, session);
+    }
+
     private TranscriptEntry? FindStreamingReplyEntry()
-        => TranscriptItems.LastOrDefault(item => item.Label == "Qwen" && item.IsStreaming);
+        => TranscriptItems.LastOrDefault(item => TranscriptPresentationPolicy.IsAssistant(item.Label) && item.IsStreaming);
 
     /// <summary>Locate this job's streaming bubble without stealing another generation's row.</summary>
     private TranscriptEntry? FindStreamingReplyForGeneration(SessionGeneration gen)
@@ -936,22 +1686,22 @@ public sealed partial class MainPage : Page
         if (gen.ReplyEntry is not null && TranscriptItems.Contains(gen.ReplyEntry))
             return gen.ReplyEntry;
 
-        // Prefer Qwen after this gen's user bubble.
+        // Prefer the assistant row after this generation's user bubble.
         if (gen.SubmittedEntry is not null && TranscriptItems.Contains(gen.SubmittedEntry))
         {
             var idx = TranscriptItems.IndexOf(gen.SubmittedEntry);
             for (var i = idx + 1; i < TranscriptItems.Count; i++)
             {
-                if (TranscriptItems[i].Label == "Qwen" && TranscriptItems[i].IsStreaming)
+                if (TranscriptPresentationPolicy.IsAssistant(TranscriptItems[i].Label) && TranscriptItems[i].IsStreaming)
                     return TranscriptItems[i];
             }
         }
 
-        // Fallback: last streaming Qwen only if its preceding user matches this gen.
+        // Fallback: use the last streaming assistant only when its preceding user matches this generation.
         for (var i = TranscriptItems.Count - 1; i >= 0; i--)
         {
             var item = TranscriptItems[i];
-            if (item.Label != "Qwen" || !item.IsStreaming) continue;
+            if (!TranscriptPresentationPolicy.IsAssistant(item.Label) || !item.IsStreaming) continue;
             for (var j = i - 1; j >= 0; j--)
             {
                 if (TranscriptItems[j].Label != "你") continue;
@@ -966,7 +1716,7 @@ public sealed partial class MainPage : Page
     }
 
     /// <summary>
-    /// Upsert this round's 你/Qwen pair into a session transcript (idempotent — fixes double replies).
+    /// Upsert this round's user/assistant pair into a session transcript (idempotent — fixes double replies).
     /// </summary>
     private static void UpsertGenerationTranscript(ConversationSession session, SessionGeneration gen, string assistantMessage)
     {
@@ -984,19 +1734,19 @@ public sealed partial class MainPage : Page
             }
 
             var removeCount = 1;
-            if (i + 1 < turns.Count && turns[i + 1].Label == "Qwen")
+            if (i + 1 < turns.Count && TranscriptPresentationPolicy.IsAssistant(turns[i + 1].Label))
                 removeCount = 2;
             turns.RemoveRange(i, removeCount);
             // Keep scanning in case older partial duplicates exist.
         }
 
         turns.Add(new ConversationTurn("你", gen.VisibleUserText));
-        turns.Add(new ConversationTurn("Qwen", assistantMessage));
+        turns.Add(new ConversationTurn(TranscriptPresentationPolicy.AssistantLabel, assistantMessage));
         session.Transcript = turns;
         session.UpdatedAt = DateTimeOffset.Now;
     }
 
-    /// <summary>Replace the last Qwen body after assistant-prefill continuation.</summary>
+    /// <summary>Replace the last assistant body after assistant-prefill continuation.</summary>
     private static void UpsertContinuedAssistantTranscript(ConversationSession session, string assistantMessage)
     {
         var turns = session.Transcript
@@ -1004,14 +1754,14 @@ public sealed partial class MainPage : Page
             .ToList();
         for (var i = turns.Count - 1; i >= 0; i--)
         {
-            if (turns[i].Label != "Qwen") continue;
-            turns[i] = new ConversationTurn("Qwen", assistantMessage);
+            if (!TranscriptPresentationPolicy.IsAssistant(turns[i].Label)) continue;
+            turns[i] = new ConversationTurn(TranscriptPresentationPolicy.AssistantLabel, assistantMessage);
             session.Transcript = turns;
             session.UpdatedAt = DateTimeOffset.Now;
             return;
         }
 
-        turns.Add(new ConversationTurn("Qwen", assistantMessage));
+        turns.Add(new ConversationTurn(TranscriptPresentationPolicy.AssistantLabel, assistantMessage));
         session.Transcript = turns;
         session.UpdatedAt = DateTimeOffset.Now;
     }
@@ -1038,7 +1788,7 @@ public sealed partial class MainPage : Page
             gen.Session.History = gen.RequestHistory
                 .Concat([new ChatMessage("user", gen.UserMessage), new ChatMessage("assistant", assistantMessage)])
                 .ToList();
-            // Idempotent transcript write for this round — avoids double Qwen when mid-stream was captured.
+            // Idempotent transcript write for this round avoids duplicate assistant rows after mid-stream capture.
             UpsertGenerationTranscript(gen.Session, gen, assistantMessage);
         }
         gen.Session.LastFinishReason = completion.FinishReason;
@@ -1065,6 +1815,7 @@ public sealed partial class MainPage : Page
 
             // Rebuild UI from the canonical session transcript so any stale stream rows are gone.
             RebuildVisibleTranscriptFromSession(gen.Session, liveGen: null);
+            RestoreQuestionAnchorAfterRebuild(gen.Session, gen.VisibleUserText);
             PersistSessions();
         }
         else
@@ -1111,22 +1862,22 @@ public sealed partial class MainPage : Page
                 : (int)Stopwatch.GetElapsedTime(gen.StartedTimestamp).TotalSeconds;
             if (string.Equals(completion.FinishReason, "cancelled", StringComparison.OrdinalIgnoreCase))
                 SetNotice(
-                    $"已停止（约 {cjk} 字 · {elapsed}s）。可点「{LongFormPlanner.PrefillContinueButtonLabel}」从中断处接着写。",
+                    $"已停止（约 {cjk} 字，用时 {elapsed}s）。可点「{LongFormPlanner.PrefillContinueButtonLabel}」从中断处接着写。",
                     WarningText);
             else if (remaining is not null && remaining.Active)
                 SetNotice(
-                    $"第 {remaining.CompletedSegments}/{remaining.TotalSegments} 段完成（约 {cjk} 字 · {elapsed}s，全文约 {remaining.TargetChars} 字）。点「{LongFormPlanner.NextSegmentButtonLabel}」续写。",
+                    $"第 {remaining.CompletedSegments}/{remaining.TotalSegments} 段完成（约 {cjk} 字，用时 {elapsed}s，全文约 {remaining.TargetChars} 字）。点「{LongFormPlanner.NextSegmentButtonLabel}」续写。",
                     MutedText);
             else if (gen.IsSegmentTurn && remaining is null)
-                SetNotice($"长文全部分段已完成（末段约 {cjk} 字 · {elapsed}s）。", MutedText);
+                SetNotice($"长文全部分段已完成（末段约 {cjk} 字，用时 {elapsed}s）。", MutedText);
             else if (string.Equals(completion.FinishReason, "length", StringComparison.OrdinalIgnoreCase))
                 SetNotice(
-                    $"已达本轮上限 {maxOutputTokens} token（约 {cjk} 字 · {elapsed}s）。可点「{LongFormPlanner.PrefillContinueButtonLabel}」接着写，或在设置中提高最大输出。",
+                    $"已达本轮上限 {maxOutputTokens} token（约 {cjk} 字，用时 {elapsed}s）。可点「{LongFormPlanner.PrefillContinueButtonLabel}」接着写，或在设置中提高最大输出。",
                     WarningText);
             else if (gen.IsContinuation)
-                SetNotice($"已从中断处继续（本段约 {cjk} 字 · {elapsed}s）。", MutedText);
+                SetNotice($"已从中断处继续（本段约 {cjk} 字，用时 {elapsed}s）。", MutedText);
             else if (elapsed >= 3 || cjk >= 200)
-                SetNotice($"本轮完成（约 {cjk} 字 · {elapsed}s · 上限 {maxOutputTokens} token）。", MutedText);
+                SetNotice($"本轮完成（约 {cjk} 字，用时 {elapsed}s，上限 {maxOutputTokens} token）。", MutedText);
         }
         else
         {
@@ -1270,6 +2021,7 @@ public sealed partial class MainPage : Page
 
     private async void ClearButton_Click(object sender, RoutedEventArgs e)
     {
+        CancelActiveChatQueue();
         // Clearing the session that is generating must stop that job first.
         if (ActiveGeneration is { } activeGen)
         {
@@ -1311,6 +2063,7 @@ public sealed partial class MainPage : Page
 
     private async void DeleteSessionButton_Click(object sender, RoutedEventArgs e)
     {
+        CancelActiveChatQueue();
         if (ActiveGeneration is { } activeGen)
         {
             try { activeGen.Cts.Cancel(); } catch { }
@@ -1349,6 +2102,7 @@ public sealed partial class MainPage : Page
         PersistSessions();
         RefreshSessionPicker();
         RefreshComposerBusyState();
+        RefreshQueuedChatNotices();
         var others = OtherRunningGenerations(session.Id).Select(g => g.Session.Title).ToList();
         if (FindGeneration(session.Id) is not null)
             SetNotice(others.Count > 0
@@ -1374,7 +2128,7 @@ public sealed partial class MainPage : Page
         if (FindGeneration(session.Id) is { } gen && IsViewingSession(session.Id))
             EnsureLiveGenerationBubbles(gen);
 
-        // While a generation is in flight, do not persist its partial 你/Qwen into sessions.json
+        // While a generation is in flight, do not persist its partial user/assistant pair into sessions.json
         // via Capture — CommitGenerationSuccess upserts the final pair once (prevents double replies).
         IEnumerable<(string Label, string Text)> turns;
         if (FindGeneration(session.Id) is { } liveGen)
@@ -1383,9 +2137,9 @@ public sealed partial class MainPage : Page
                 .Where(item => SystemNoticePolicy.ShouldPersist(item.Label, item.Text))
                 .Where(item =>
                     !(item.Label == "你" && string.Equals(item.Text, liveGen.VisibleUserText, StringComparison.Ordinal))
-                    && !(item.Label == "Qwen" && (item.IsStreaming || ReferenceEquals(item, liveGen.ReplyEntry))))
+                    && !(TranscriptPresentationPolicy.IsAssistant(item.Label) && (item.IsStreaming || ReferenceEquals(item, liveGen.ReplyEntry))))
                 .Select(item => (item.Label, item.Text));
-            session.Capture(_history, turns, _lastFinishReason, draftInput: InputBox.Text);
+            session.Capture(_history, turns, _lastFinishReason, draftInput: InputBox.Text, draftAttachmentPaths: _attachmentPaths);
         }
         else
         {
@@ -1395,7 +2149,8 @@ public sealed partial class MainPage : Page
                     .Where(item => SystemNoticePolicy.ShouldPersist(item.Label, item.Text))
                     .Select(item => (item.Label, item.Text)),
                 _lastFinishReason,
-                draftInput: InputBox.Text);
+                draftInput: InputBox.Text,
+                draftAttachmentPaths: _attachmentPaths);
         }
 
         _sessions.ApplySort();
@@ -1436,7 +2191,7 @@ public sealed partial class MainPage : Page
             }
 
             var removeCount = 1;
-            if (i + 1 < turns.Count && turns[i + 1].Label == "Qwen")
+            if (i + 1 < turns.Count && TranscriptPresentationPolicy.IsAssistant(turns[i + 1].Label))
                 removeCount = 2;
             turns.RemoveRange(i, removeCount);
         }
@@ -1445,7 +2200,7 @@ public sealed partial class MainPage : Page
     }
 
     /// <summary>
-    /// Ensure this job has 你 + streaming Qwen bubbles on the current UI (bound to gen.*Entry).
+    /// Ensure this job has user and streaming assistant bubbles on the current UI (bound to gen.*Entry).
     /// </summary>
     private void EnsureLiveGenerationBubbles(SessionGeneration gen)
     {
@@ -1469,7 +2224,7 @@ public sealed partial class MainPage : Page
             }
             else
             {
-                gen.ReplyEntry = AppendTurn("Qwen", partial, PrimaryText, isStreaming: true);
+                gen.ReplyEntry = AppendTurn(TranscriptPresentationPolicy.AssistantLabel, partial, PrimaryText, isStreaming: true);
             }
         }
         else
@@ -1480,14 +2235,14 @@ public sealed partial class MainPage : Page
 
     /// <summary>
     /// Rebuild the visible transcript from session data; attach live generation bubbles without
-    /// reinterpreting an older completed Qwen row as the current stream.
+    /// reinterpreting an older completed assistant row as the current stream.
     /// </summary>
     private void RebuildVisibleTranscriptFromSession(ConversationSession session, SessionGeneration? liveGen)
     {
         TranscriptItems.Clear();
 
         // Completed turns only — if live gen's user line was partially captured earlier, skip it here
-        // and re-add from liveGen so we never get two 你/Qwen pairs for the same round.
+        // and re-add from liveGen so one round never gets two user/assistant pairs.
         var turns = session.Transcript;
         for (var i = 0; i < turns.Count; i++)
         {
@@ -1504,8 +2259,8 @@ public sealed partial class MainPage : Page
                 && turn.Label == "你"
                 && string.Equals(turn.Text, liveGen.VisibleUserText, StringComparison.Ordinal))
             {
-                // Skip this user and an immediate following Qwen (mid-stream capture of the live job).
-                if (i + 1 < turns.Count && turns[i + 1].Label == "Qwen")
+                // Skip this user and an immediate following assistant row captured from the live job.
+                if (i + 1 < turns.Count && TranscriptPresentationPolicy.IsAssistant(turns[i + 1].Label))
                     i++;
                 continue;
             }
@@ -1549,6 +2304,9 @@ public sealed partial class MainPage : Page
         InputBox.Text = session.DraftInput ?? string.Empty;
         if (InputBox.Text.Length > 0)
             InputBox.SelectionStart = InputBox.Text.Length;
+        _attachmentPaths.Clear();
+        _attachmentPaths.AddRange(session.DraftAttachmentPaths);
+        RebuildChatAttachmentChips();
 
         var liveGen = FindGeneration(session.Id);
         if (session.Transcript.Count == 0 && liveGen is null)
@@ -1592,6 +2350,63 @@ public sealed partial class MainPage : Page
         {
             _suppressSessionPicker = false;
         }
+    }
+
+    private void RefreshVideoSessionPicker()
+    {
+        _suppressVideoSessionPicker = true;
+        try
+        {
+            VideoSessionPicker.ItemsSource = null;
+            VideoSessionPicker.ItemsSource = VideoPanel.Sessions.ToList();
+            VideoSessionPicker.DisplayMemberPath = nameof(VideoSession.Title);
+            VideoSessionPicker.SelectedItem = VideoPanel.Sessions.FirstOrDefault(s => s.Id == VideoPanel.ActiveSession.Id);
+            DeleteVideoSessionButton.IsEnabled = VideoPanel.Sessions.Count > 1;
+        }
+        finally
+        {
+            _suppressVideoSessionPicker = false;
+        }
+    }
+
+    private void NewVideoSessionButton_Click(object sender, RoutedEventArgs e)
+    {
+        VideoPanel.NewSession();
+        RefreshVideoSessionPicker();
+        SetNotice(VideoPanel.HasRunningJob
+            ? "已新建视频窗口。上一窗口的任务继续在后台跑。"
+            : "已新建视频窗口。", MutedText);
+    }
+
+    private async void DeleteVideoSessionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!await VideoPanel.DeleteActiveSessionAsync())
+        {
+            SetNotice("至少保留一个视频窗口。", WarningText);
+            return;
+        }
+
+        RefreshVideoSessionPicker();
+        SetNotice("已删除视频窗口。", MutedText);
+    }
+
+    private void VideoSessionPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressVideoSessionPicker) return;
+        if (VideoSessionPicker.SelectedItem is not VideoSession selected) return;
+        if (selected.Id == VideoPanel.ActiveSession.Id) return;
+        if (!VideoPanel.TryActivateSession(selected.Id))
+        {
+            RefreshVideoSessionPicker();
+            return;
+        }
+
+        RefreshVideoSessionPicker();
+        SetNotice(VideoPanel.IsActiveSessionGenerating
+            ? $"已回到生成中的视频窗口：{selected.Title}"
+            : VideoPanel.HasRunningJob
+                ? $"当前视频窗口：{selected.Title}（另一窗口仍在生成）"
+                : $"当前视频窗口：{selected.Title}", MutedText);
     }
 
     private async void ExportButton_Click(object sender, RoutedEventArgs e)
@@ -1663,6 +2478,89 @@ public sealed partial class MainPage : Page
         });
     }
 
+    private void EditUserMessageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: TranscriptEntry entry }) return;
+        if (!entry.CanEdit) return;
+        if (IsActiveSessionGenerating())
+        {
+            SetNotice("当前会话仍在生成中，请先停止或等完成后再改提问。", WarningText);
+            return;
+        }
+
+        foreach (var item in TranscriptItems)
+        {
+            if (!ReferenceEquals(item, entry))
+                item.CancelEdit();
+        }
+        entry.BeginEdit();
+        ScrollTranscriptToQuestion(entry);
+    }
+
+    private void CancelEditUserMessageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: TranscriptEntry entry })
+            entry.CancelEdit();
+    }
+
+    private async void RegenerateUserMessageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: TranscriptEntry entry }) return;
+        if (IsActiveSessionGenerating())
+        {
+            SetNotice("当前会话仍在生成中，请先停止或等完成后再重新生成。", WarningText);
+            return;
+        }
+
+        var occurrenceFromEnd = 0;
+        var start = TranscriptItems.IndexOf(entry);
+        if (start < 0)
+        {
+            SetNotice("找不到要编辑的提问。", WarningText);
+            return;
+        }
+        for (var i = start + 1; i < TranscriptItems.Count; i++)
+        {
+            if (TranscriptItems[i].Label == "你"
+                && string.Equals(TranscriptItems[i].Text, entry.Text, StringComparison.Ordinal))
+            {
+                occurrenceFromEnd++;
+            }
+        }
+
+        var owner = _sessions.Active;
+        if (!ConversationEdit.TryPrepareRegenerate(
+                _history,
+                owner.Transcript,
+                entry.Text,
+                occurrenceFromEnd,
+                entry.EditText,
+                out var prepared,
+                out var error)
+            || prepared is null)
+        {
+            SetNotice(error ?? "这条提问无法重新生成。", WarningText);
+            return;
+        }
+
+        CancelActiveChatQueue();
+        owner.History = prepared.History.ToList();
+        owner.Transcript = prepared.Transcript.ToList();
+        owner.LongFormPlan = null;
+        owner.LastFinishReason = null;
+        owner.UpdatedAt = DateTimeOffset.Now;
+        _history.Clear();
+        _history.AddRange(prepared.History.Select(m => new ChatMessage(m.Role, m.Content)));
+        _lastFinishReason = null;
+        RebuildVisibleTranscriptFromSession(owner, liveGen: null);
+        PersistSessions();
+        UpdateContinueButtonState();
+        await SendAsync(
+            forcedUserMessage: prepared.ModelUserText,
+            displayUserLabel: prepared.VisibleUserText,
+            skipAttachments: true);
+    }
+
     private async void CopyMessageButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string markdown }) return;
@@ -1716,7 +2614,7 @@ public sealed partial class MainPage : Page
 
     private TranscriptEntry AppendTurn(string speaker, string text, Color speakerColor, bool isStreaming = false)
     {
-        // Keep the model label as "Qwen" (not "QWEN"); role labels are display text, not enum keys.
+        // Role labels are display text, not enum keys; new assistant rows use the generic AI label.
         return AppendFormatted(speaker, text, speakerColor, 13, isStreaming);
     }
 
@@ -1745,25 +2643,123 @@ public sealed partial class MainPage : Page
     {
         DispatcherQueue.TryEnqueue(() =>
         {
+            TranscriptList.UpdateLayout();
             TranscriptList.ScrollIntoView(questionEntry, ScrollIntoViewAlignment.Leading);
         });
     }
+
+    private void RestoreQuestionAnchorAfterRebuild(ConversationSession session, string submittedQuestion)
+    {
+        var turnIndex = TranscriptPresentationPolicy.FindLatestQuestionIndex(session.Transcript, submittedQuestion);
+        if (turnIndex < 0) return;
+        var question = TranscriptItems.LastOrDefault(entry =>
+            string.Equals(entry.Label, "你", StringComparison.Ordinal)
+            && string.Equals(entry.Text, session.Transcript[turnIndex].Text, StringComparison.Ordinal));
+        if (question is not null) ScrollTranscriptToQuestion(question);
+    }
+
+    private ChatAttachmentPolicy CurrentAttachmentPolicy()
+        => (_settings.ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults).Normalized();
+
+    private async void AttachChatFileButton_Click(object sender, RoutedEventArgs e)
+    {
+        var policy = CurrentAttachmentPolicy();
+        var extensions = policy.AllowedExtensions();
+        if (extensions.Count == 0)
+        {
+            SetNotice("设置里至少打开一种聊天附件类型。", WarningText);
+            return;
+        }
+
+        var remaining = policy.MaxFiles - _attachmentPaths.Count;
+        if (remaining <= 0)
+        {
+            SetNotice($"附件最多 {policy.MaxFiles} 个。", WarningText);
+            return;
+        }
+
+        try
+        {
+            var picker = new FileOpenPicker
+            {
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                ViewMode = PickerViewMode.List,
+            };
+            foreach (var extension in extensions)
+                picker.FileTypeFilter.Add(extension);
+            if (App.WindowHandle != 0)
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+            var files = await picker.PickMultipleFilesAsync();
+            if (files is null || files.Count == 0) return;
+            var incoming = files.Select(file => file.Path).Take(remaining);
+            var merged = VideoMediaInputs.MergeReferencePaths(_attachmentPaths, incoming, policy.MaxFiles);
+            _attachmentPaths.Clear();
+            _attachmentPaths.AddRange(merged);
+            RebuildChatAttachmentChips();
+            CaptureIntoSession(_sessions.Active);
+            PersistSessions();
+        }
+        catch (Exception error)
+        {
+            SetNotice($"选择附件失败：{error.Message}", ErrorText);
+        }
+    }
+
+    private void RebuildChatAttachmentChips()
+    {
+        if (ChatAttachmentsHost is null) return;
+        ChatAttachmentsHost.Items.Clear();
+        foreach (var path in _attachmentPaths.ToArray())
+        {
+            var current = path;
+            var name = Path.GetFileName(current);
+            var clear = new Button
+            {
+                Content = "清除",
+                Style = (Style)Application.Current.Resources["ToolbarButtonStyle"],
+            };
+            clear.Click += (_, _) =>
+            {
+                _attachmentPaths.Remove(current);
+                RebuildChatAttachmentChips();
+                CaptureIntoSession(_sessions.Active);
+                PersistSessions();
+            };
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            row.Children.Add(new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(name) ? "未命名" : name,
+                Style = (Style)Application.Current.Resources["ComposerMetaTextStyle"],
+                VerticalAlignment = VerticalAlignment.Center,
+                MaxWidth = 140,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            row.Children.Add(clear);
+            ChatAttachmentsHost.Items.Add(row);
+        }
+
+        ChatAttachmentsHost.Visibility = _attachmentPaths.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateChatComposerLayout();
+    }
+
+    private static string FormatTextComposerMeta(LocalChatSettings settings)
+        => $"上下文 {settings.ContextSize}      输出上限 {settings.MaxOutputTokens}";
 
     private void RefreshComposerBusyState()
     {
         // Stop mode only when the *currently viewed* session owns an in-flight generation.
         var busyHere = IsActiveSessionGenerating();
+        var queuedHere = _chatQueue.Position(_sessions.Active.Id) is not null;
         _busy = busyHere;
-        var atParallelLimit = !busyHere && _generations.Count >= MaxParallelGenerations;
-        var composerState = ChatInteractionPolicy.ComposerState(busyHere);
-        SendButton.IsEnabled = composerState.ActionEnabled && !atParallelLimit;
+        var composerState = ChatInteractionPolicy.ComposerState(busyHere || queuedHere);
+        SendButton.IsEnabled = composerState.ActionEnabled;
         InputBox.IsEnabled = true;
         InputBox.IsReadOnly = false;
-        if (busyHere)
+        if (busyHere || queuedHere)
         {
             SendButton.Content = ChatInteractionPolicy.ActionLabel(busy: true);
             SendButton.Style = (Style)Application.Current.Resources["SecondaryButtonStyle"];
-            AutomationProperties.SetName(SendButton, "停止生成");
+            AutomationProperties.SetName(SendButton, queuedHere ? "取消排队" : "停止生成");
             SendButton.IsEnabled = true;
         }
         else
@@ -1771,9 +2767,6 @@ public sealed partial class MainPage : Page
             SendButton.Content = ChatInteractionPolicy.ActionLabel(busy: false);
             SendButton.Style = (Style)Application.Current.Resources["PrimaryButtonStyle"];
             AutomationProperties.SetName(SendButton, "发送消息");
-            // Other sessions may still generate in the background up to parallel_slots.
-            if (atParallelLimit)
-                SendButton.IsEnabled = false;
         }
 
         MoreButton.IsEnabled = true;

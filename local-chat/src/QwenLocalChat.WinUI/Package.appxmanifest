@@ -16,7 +16,7 @@
   <mp:PhoneIdentity PhoneProductId="7D1F07DC-0090-4570-868B-B0D5D40CFB40" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>Qwen Local</DisplayName>
+    <DisplayName>Local AI</DisplayName>
     <PublisherDisplayName>AppPublisher</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -35,8 +35,8 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="Qwen Local"
-        Description="Local Qwen chat"
+        DisplayName="Local AI"
+        Description="Local AI chat and video"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

@@ -46,7 +46,7 @@
 1. `MainPage.xaml` 的 `ModeSelector` 增加第三项，三路显示切换。
 2. `ModeSelector_SelectionChanged` 从「是否视频」改成三态；选中「聊天」时的可见性必须与改前「非视频」一致。
 3. `PrepareForVideoAsync` / 聊天发送入口增加「汉化任务占用中则拒绝」。
-4. `LocalChatSettings` 增加三个可空路径字段和 `hanhua_engine`；路径缺省为空，引擎缺省 `local`，旧设置文件缺键时其它字段与现在相同。
+4. `LocalChatSettings` 增加三个路径字段和 `hanhua_engine`；路径缺省为本机现网目录，引擎缺省 `local`，旧设置文件缺键或空字符串时填入同一默认路径，其它字段与现在相同。用户可在设置里改。
 5. 设置「本地服务」卡末尾追加汉化路径三字段；互斥开关文案改为说明聊天、视频、汉化三者互斥，JSON 键不变。引擎下拉在汉化页，不进设置抽屉。
 6. `docs/winui-ui-baseline.md` 与 `verify-winui-ui-baseline.ps1` 把模式工具栏从两项更新为三项。
 7. 内嵌汉化 Python 增加可选 `--progress-jsonl`、图片填字 `--mt`、和新的抽字入口；默认不传这些旗标时 stdout 仍可被人读，bat 行为不变。现有脚本的默认路径保持原样，仅在设置了 `HANHUA_MIT_ROOT` 时改用设置值。不把密钥写入 Local AI 设置、命令行或环境变量。
@@ -58,7 +58,7 @@ Local AI 顶部为 `聊天 | 视频 | 汉化`。汉化页只调度，不自己�
 - WinUI：`HanhuaPanel` 负责选目录、进度、打开结果。
 - Core：`HanhuaJobStore` 写 `data/hanhua-jobs.json`；`HanhuaCommand` 只拼 Python 命令；`HanhuaProcessHost` 启进程、读进度、取消。
 - 显存：聊天生成、视频生成、汉化任务三选一。本机翻字需要 Qwen；阿里云翻字不启停 Qwen；OCR/嵌字仍要停 Qwen 与视频。
-- Python（路径来自设置，不写死盘符）：游戏 `one_click_rm.py`，本机加 `--local`，阿里云不加；图片 `ocr_extract_local.py` → `fill_ocr_local.py`（本机默认，阿里云加 `--mt`）→ `typeset_ocr_local.py`。
+- Python（路径来自设置，缺省填本机现网目录，可改）：游戏 `one_click_rm.py`，本机加 `--local`，阿里云不加；图片 `ocr_extract_local.py` → `fill_ocr_local.py`（本机默认，阿里云加 `--mt`）→ `typeset_ocr_local.py`。
 - 本机翻字打 `127.0.0.1:18135`。阿里云翻字由 Python 读取现有 MTool 配置，C# 不经手密钥。OCR/嵌字只打 manga-image-translator。
 
 C# 不调用聊天补全接口做翻译，也不调用阿里云。翻句仍由 Python 执行：本机走 `local_qwen.py`（system 加 user、思考关闭、保护游戏控制码）；阿里云走现有 qwen-mt payload。Local AI 只在本机翻字阶段保证该服务健康，并在 OCR/嵌字阶段把它停掉。
@@ -69,16 +69,16 @@ C# 不调用聊天补全接口做翻译，也不调用阿里云。翻句仍由 P
 
 对标 `VideoGenerationPanel`：上主区、中输入卡、下 64 高命令栏。不使用聊天气泡列表。
 
-主区：只读任务日志。游戏完成后可打开中文副本。图片完成后可预览输出目录最后一张 png。没有成品时显示「选择游戏或图片目录后开始」。
+主区：只读任务日志，左上标题「任务日志」。点开始后先写一行流程说明（图片：抽字 → 填字 → 嵌字；游戏：复制 → 抽字 → 翻译 → 回写），再写各步进度。游戏完成后可打开中文副本。图片完成后可预览输出目录最后一张 png。空闲时说明选目录后点开始汉化即可、会自动跑完全程，不用点右上角启动。
 
 输入卡：
 
 - 标题「汉化任务」
 - 右侧两个下拉：种类（游戏文本 / 漫画图片）、引擎（本机 Qwen / 阿里云）。默认引擎是本机 Qwen。位置对标视频生成模式下拉。
 - 只读路径框加「选择目录」
-- 主按钮在正文行最右：空闲为「开始汉化」，运行中为「取消」
+- 唯一的主按钮在正文行最右：空闲为「开始汉化」，运行中为「取消」。底栏不再重复「开始汉化」。
 
-底栏对标视频：一行状态摘要、进度条、条右侧百分比。右侧：设置 / 打开结果 / 开始或取消。失败时「查看详情」展示完整日志，摘要仍只一行。
+底栏对标视频生成：一行状态摘要、进度条、条右侧百分比。运行中摘要为「第 2/3 步 正在填字  已用时 hh:mm:ss  剩余约 hh:mm:ss  done/total 句或页」；百分比只出现在条右侧，不写进摘要。剩余时间用当前阶段 done/total 做线性外推，规则与视频相同（满 8 秒且进度超过 2% 才显示，避免开局乱猜）。没有总数时进度条不确定，只走已用时。结束、失败、取消后摘要仍带已用时。每秒刷新时钟，不必等下一条 JSONL。右侧：设置 / 打开结果；运行中额外显示「取消」。失败时摘要用中文说明原因和下一步（不用点启动，点开始汉化可重试），「查看详情」才给完整日志。不在底栏再放「开始汉化」。`mit_exit=4294967295` 这类原始退出码不得出现在摘要里。
 
 汉化页不提供多窗口会话。一次只跑一个任务。历史留在任务文件里供续跑，界面只展示当前任务。
 
@@ -116,12 +116,12 @@ C# 不调用聊天补全接口做翻译，也不调用阿里云。翻句仍由 P
 
 | JSON 键 | 含义 | 默认 |
 | --- | --- | --- |
-| `hanhua_pack_root` | 内嵌汉化工具包根目录 | 空 |
-| `hanhua_python_exe` | Python 可执行文件 | 空 |
-| `hanhua_mit_root` | manga-image-translator 根目录 | 空 |
+| `hanhua_pack_root` | 内嵌汉化工具包根目录 | `D:\grok\内嵌汉化` |
+| `hanhua_python_exe` | Python 可执行文件 | `C:\Users\kow\AppData\Local\Programs\Python\Python312\python.exe` |
+| `hanhua_mit_root` | manga-image-translator 根目录 | `D:\grok\tools\manga-image-translator` |
 | `hanhua_engine` | 汉化页引擎：`local` 或 `aliyun` | `local` |
 
-缺键或路径为空字符串时：汉化页拒绝开始，状态行提示去设置里填路径。`hanhua_engine` 缺键、空值或未知值一律当作 `local`。Core 不得写死固定盘符或当前用户主目录。本机可在设置里填现网路径。
+缺键或路径为空字符串时：填入上表默认路径，设置抽屉显示这些值，用户可改。路径改过后即时生效，不重启模型。目录或 Python 实际不存在时，汉化页拒绝开始并提示去设置里改。`hanhua_engine` 缺键、空值或未知值一律当作 `local`。
 
 路径和引擎变更即时生效，不重启模型。引擎下拉写回 `hanhua_engine`，不进设置抽屉。
 
@@ -152,9 +152,9 @@ GPU 细则：
 
 阶段必须串行，由 C# 在阶段之间切换 GPU：
 
-1. 抽字：停 Qwen 与视频，跑 `ocr_extract_local.py --progress-jsonl`，写出空译文表和 `typeset_in`。
+1. 抽字：停 Qwen 与视频，跑 `ocr_extract_local.py --progress-jsonl`（MIT `--prep-manual`，不带 `--save-text`），写出空译文表和 `typeset_in`。抽完后把 `*_ocr.json` / `*_translations.txt` 移到 `ocr_sidecars`，避免 MIT 把 sidecar 当图片打开。
 2. 填字：本机启动 Qwen 并做健康检查（loopback 禁用系统代理），跑 `fill_ocr_local.py --progress-jsonl`。阿里云不启停 Qwen，跑 `fill_ocr_local.py --mt --progress-jsonl`。已填且不等于原文的键跳过。
-3. 嵌字：再停 Qwen，跑 `typeset_ocr_local.py --progress-jsonl`。MIT 保持 translator=none，用环境变量指向已填译文表，不让 MIT 自己调模型。
+3. 嵌字：再停 Qwen，跑 `typeset_ocr_local.py --progress-jsonl`。嵌字前再次隔离 sidecar。MIT 保持 translator=none，用环境变量指向已填译文表，不让 MIT 自己调模型（8GB 上不能在 OCR/擦字同时加载本机 Qwen）。
 
 游戏任务与图片任务不能并行。图片三阶段是同一个任务，取消停在当前阶段；续跑从该阶段重来（填字跳过已填）。
 
@@ -182,7 +182,9 @@ GPU 细则：
 | OCR/嵌字时本机文本口仍在听 | 先停本窗口可停的 Qwen；仍健康则拒绝 |
 | 聊天正在生成 | 拒绝开始汉化，不取消聊天 |
 | 汉化正在跑 | 拒绝发送聊天、拒绝开始视频 |
-| Python 非 0 退出 | 状态 Failed，详情为尾部日志 |
+| Python 非 0 退出 | 状态 Failed；摘要一行中文原因加「点开始汉化可重试」，原始日志进详情 |
+| 图片抽字 MIT `--save-text` 主动 `exit(-1)`（Windows 为 4294967295） | 当作抽字失败并说明提前退出；抽字命令改用 `--prep-manual`，不再带 `--save-text` |
+| MIT 把 `typeset_in` 里的 `*_ocr.json` / `*_translations.txt` 当图片打开 | 抽字后、嵌字前把非图片 sidecar 移到 `ocr_sidecars`，输入目录只留 png |
 | 用户取消 | 结束进程树；游戏已填句子保留；图片停在当前阶段 |
 | 脚本把日文原样写回或无效刷屏 | 仍由现有 Python 拒绝逻辑处理，C# 不重复实现 |
 
@@ -192,11 +194,13 @@ GPU 细则：
 
 Core（加入 `tests/QwenLocalChat.Tests/Program.cs` 的具名用例）：
 
-- 旧设置文件无汉化键时三个路径为空、引擎为 `local`，其它字段与现在一致。
+- 旧设置文件无汉化键或路径为空时三个路径为本机默认值、引擎为 `local`，其它字段与现在一致；自定义路径仍往返磁盘。
 - 填写汉化路径和 `aliyun` 引擎后往返磁盘，不影响互斥开关默认开启。
 - 本机游戏命令含 `--local` 与 `--progress-jsonl`；阿里云游戏命令含 `--progress-jsonl` 且不含 `--local`；环境都不含密钥。
 - 本机填字命令不含 `--mt`；阿里云填字命令含 `--mt`。图片三阶段命令顺序与工作目录正确。
 - JSONL 解析覆盖 progress / done / error / 非 JSON 行。
+- 汉化底栏进度对标视频：填字 3/9 在 10 分钟时应显示第 2/3 步、已用时、剩余约 20 分钟、3/9 句；百分比只在条旁；抽字用「页」；阶段尚无总数时不估剩余；结束行保留已用时。
+- `mit_exit=4294967295` 摘要为中文失败原因，并提示不用点启动、点开始汉化可重试。
 - 汉化 Running 时不能开始视频、不能开始第二份汉化、不能发送聊天；视频 Running 时不能开始汉化。
 - 本机填字需要 Qwen；阿里云填字与游戏翻字不把 Qwen 列入启动条件。OCR/嵌字无论引擎都要求停 Qwen。
 - 启动计划：汉化中断不得改变 text / video / none。
@@ -205,7 +209,8 @@ Python（内嵌汉化现有离线测试增补，原有项保持）：
 
 - 带 `--progress-jsonl` 时输出可解析；缺省时云端 bat 仍无该旗标、仍无 `--local`。本地游戏 bat 仍有 `--local`，仍无 `--progress-jsonl`。
 - `fill_ocr_local.py` 无旗标时仍是本机；`--mt` 走云端分流。点我用本地Qwen翻已抽出的图字.bat 不含 `--mt`。
-- 新抽字入口离线：缺目录返回非 0，不调用网络。
+- 新抽字入口离线：缺目录返回非 0，不调用网络。抽字命令含 `--prep-manual`，不含 `--save-text`。无抽出文字时把 MIT `exit(-1)` / `4294967295` 说明为提前退出。
+- 抽字/嵌字前把 `*_ocr.json` 等 sidecar 移出 png 目录，MIT 输入只剩图片。
 - 云端与本地 payload 分流原断言不变。
 
 WinUI：
@@ -217,7 +222,7 @@ WinUI：
 
 旧关系：模式工具栏为「聊天 / 视频」两项。
 
-新关系：同一左对齐 SelectorBar 为「聊天 / 视频 / 汉化」。模式专属工具仍在同一行剩余区域。汉化页复用「主区 / 输入卡 / 64 高底栏」节奏，输入卡同样是左侧标题、右侧精简元数据、主按钮在正文行最右。颜色、柔光、圆角不在本需求授权范围内。
+新关系：同一左对齐 SelectorBar 为「聊天 / 视频 / 汉化」。模式专属工具仍在同一行剩余区域。汉化页复用「主区 / 输入卡 / 64 高底栏」节奏，输入卡同样是左侧标题、右侧精简元数据、主按钮在正文行最右。主区是任务日志而不是聊天记录。底栏不重复「开始汉化」。颜色、柔光、圆角不在本需求授权范围内。
 
 设置抽屉仍是文本/视频两栏。汉化路径放在文本分区「本地服务」卡内，短标题加一行小灰说明（即时生效）。
 

@@ -172,19 +172,19 @@ public static partial class LongFormPlanner
         {
             return
                 $"{original}\n\n" +
-                $"【分段写作·第{n}/{total}段】全文目标约{plan.TargetChars}字。" +
+                $"【分段写作 第{n}/{total}段】全文目标约{plan.TargetChars}字。" +
                 $"现在只写开头第{n}段，约{seg}字：推进情节，不要写结局，本段结束即停，禁止重复句子。";
         }
 
         if (n >= total)
         {
             return
-                $"【分段写作·第{n}/{total}段·收束】接着上文继续写约{seg}字，" +
+                $"【分段写作 第{n}/{total}段 收束】接着上文继续写约{seg}字，" +
                 $"完成高潮与结局并自然收束。禁止重复已写段落与套话堆砌，写完即停。";
         }
 
         return
-            $"【分段写作·第{n}/{total}段】接着上文继续写约{seg}字，推进情节与冲突，" +
+            $"【分段写作 第{n}/{total}段】接着上文继续写约{seg}字，推进情节与冲突，" +
             $"不要提前写结局，本段结束即停，禁止重复已写内容。";
     }
 
@@ -192,7 +192,7 @@ public static partial class LongFormPlanner
     {
         var n = segmentIndex + 1;
         if (segmentIndex == 0)
-            return $"{Truncate(plan.OriginalUserPrompt, 48)} · 第{n}/{plan.TotalSegments}段";
+            return $"{Truncate(plan.OriginalUserPrompt, 48)}  第{n}/{plan.TotalSegments}段";
         return $"{NextSegmentUserLabel} 第{n}/{plan.TotalSegments}段（约{plan.SegmentChars}字）";
     }
 
@@ -239,7 +239,7 @@ public static partial class LongFormPlanner
 
         if (plan is not null && isSegmentTurn)
         {
-            return $"长文分段 {plan.NextSegmentNumber}/{plan.TotalSegments} · 全文约{plan.TargetChars}字 · 本段上限 {effectiveMax} token（设置 {settingsMax}）。";
+            return $"长文分段 {plan.NextSegmentNumber}/{plan.TotalSegments}，全文约{plan.TargetChars}字，本段上限 {effectiveMax} token（设置 {settingsMax}）。";
         }
 
         if (plan is not null && segmentedEnabled)
@@ -276,11 +276,11 @@ public static partial class LongFormPlanner
                 ? $"分段 {plan.NextSegmentNumber}/{plan.TotalSegments}"
                 : "生成中";
         var secs = Math.Max(0, elapsedSeconds);
-        var body = $"{mode} · 上限 {maxOutputTokens} token · 已 {secs}s";
+        var body = $"{mode}，上限 {maxOutputTokens} token，已用时 {secs}s";
         if (outputChars > 0)
-            body += $" · 约 {outputChars} 字";
+            body += $"，约 {outputChars} 字";
         if (plan is not null && isSegmentTurn)
-            body += $" · 全文约{plan.TargetChars}字";
+            body += $"，全文约{plan.TargetChars}字";
         return body;
     }
 

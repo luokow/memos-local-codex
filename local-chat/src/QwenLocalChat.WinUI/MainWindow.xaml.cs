@@ -44,6 +44,8 @@ public sealed partial class MainWindow : Window
     public void SetEndpointSubtitle(string host, int port)
         => AppTitleBar.Subtitle = $"LOCAL CORE  /  {host}:{port}";
 
+    public WindowId AppWindowId => _appWindow.Id;
+
     private async void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (!_closeCoordinator.ShouldCancelClose) return;

@@ -6,7 +6,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:QwenLocalChat_WinUI"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    Title="Qwen Local"
+    Title="Local AI"
     mc:Ignorable="d">
     <Window.SystemBackdrop>
         <MicaBackdrop />
@@ -18,7 +18,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TitleBar x:Name="AppTitleBar" Title="Qwen Local" Subtitle="LOCAL CORE  /  加载配置">
+        <TitleBar x:Name="AppTitleBar" Title="Local AI" Subtitle="LOCAL CORE  /  加载配置">
             <TitleBar.IconSource>
                 <BitmapIconSource UriSource="ms-appx:///Assets/AppIconMark.png" ShowAsMonochrome="False" />
             </TitleBar.IconSource>

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "acceptanceTarget": {
+    "displayName": "Local AI",
+    "aumid": "7D1F07DC-0090-4570-868B-B0D5D40CFB40_1z32rh13vfry6!App",
+    "executableName": "QwenLocalChat.WinUI.exe"
+  },
+  "typography": {
+    "transcriptBodyStyle": "MarkdownBodyTextStyle",
+    "transcriptBodyFontFamily": "Microsoft YaHei UI",
+    "transcriptBodyFontSize": 14,
+    "transcriptBodyLineHeight": 22,
+    "inputFontSize": 15,
+    "statusTextStyle": "StatusTextStyle",
+    "statusFontFamily": "Microsoft YaHei UI",
+    "uiFontFamily": "Microsoft YaHei UI",
+    "monoFontFamily": "Cascadia Mono",
+    "rule": "UI and chat body use Microsoft YaHei UI. Cascadia Mono is reserved for machine-readable values (endpoint, code). Role labels use YaHei SemiBold, not mono. Assistant label displays as Qwen not QWEN."
+  },
+  "markdown": {
+    "presenter": "MarkdownPresenter",
+    "parser": "Markdig",
+    "supported": ["heading", "strong", "emphasis", "list", "quote", "inline-code", "code-block", "http-link", "thematic-break"],
+    "safety": "Raw HTML is displayed as inert text. Only absolute http and https links become actionable."
+    ,"selectionOwner": "Completed messages use exactly one selectable RichTextBlock so selection can cross Markdown block boundaries. A streaming reply temporarily uses one selectable TextBlock, then switches owners once at completion."
+  },
+  "interaction": {
+    "busyComposer": "Input remains enabled and editable; only sending is disabled.",
+    "replyAnchor": "The submitted question is aligned to the leading edge when sent and remains the viewport anchor after its reply completes.",
+    "scrollOwnership": "Transcript content uses the ListView native scroll owner; fixed decoration remains outside scrolling content.",
+    "modeLayout": "Chat and video share the same vertical rhythm: primary content, raised input card, and a compact bottom action area. Mode switching must not move the selector or change the visual hierarchy.",
+    "composerMetadata": "Model identity stays in the top mode toolbar. Chat input shows only context and output limit. Video input keeps a collapsed this-job summary and exposes temporary width, height, duration, steps, and seed overrides only when expanded. Primary actions stay right-aligned and vertically centered in the editor row.",
+    "composerSizing": "Chat and video share one bounded adaptive editor policy. Editors start at three lines, grow with wrapped content and viewport height to four, six, or eight lines, then scroll internally. Expanded video parameters cap the prompt at four lines so preview space remains available.",
+    "videoJobOverrides": "Each new job starts from persistent video defaults. Composer overrides apply to one request in memory and never write back to persistent settings.",
+    "expandedEditor": "Chat and video share one centered application-owned overlay. It never uses an edge-constrained Flyout or a horizontal scrollbar; only the text surface scrolls vertically.",
+    "videoPreview": "Preview uses a rounded surface, fits the media aspect ratio when the window changes, and shows transport controls only while hovered or keyboard focused.",
+    "videoOutputReveal": {
+      "actionLabel": "文件位置",
+      "rule": "The video action opens File Explorer and selects the exact output file; it does not launch the default media player."
+    },
+    "modelResidency": "Text-video model exclusivity defaults on. Turning it off keeps both services resident when switching features but does not allow a second generation while one is already active.",
+    "startupModel": "The client defaults to starting the selected text profile. Settings may choose the selected text profile, selected video profile, or no automatic startup. Each mode exposes its own start action on the main surface.",
+    "exitPrompt": {
+      "primaryAction": "退出并关闭模型服务",
+      "secondaryAction": "仅退出",
+      "cancelAction": "取消",
+      "rule": "The inline rounded prompt appears before any model health probe and always offers keep services, close services, and cancel choices."
+    },
+    "wholeMessageCopy": {
+      "automationName": "复制整条回复",
+      "style": "CopyMessageButtonStyle",
+      "visibilityBinding": "{x:Bind CopyVisibility}",
+      "rule": "Only assistant replies expose one copy action, placed beside the Qwen label, that copies all rendered Markdown blocks as readable plain text. System and user messages expose no copy button."
+    },
+    "toggleHover": {
+      "mode": "platform-default",
+      "forbiddenResourceKeys": [
+        "ToggleSwitchContainerBackgroundPointerOver",
+        "ToggleSwitchFillOffPointerOver",
+        "ToggleSwitchStrokeOffPointerOver",
+        "ToggleSwitchFillOnPointerOver",
+        "ToggleSwitchStrokeOnPointerOver",
+        "ToggleSwitchKnobFillOffPointerOver",
+        "ToggleSwitchKnobFillOnPointerOver"
+      ],
+      "rule": "Do not globally override ToggleSwitch *PointerOver theme resources. Prior native Microsoft.UI.Xaml c0000005 dumps stack through OverrideXamlResourcePropertyBag during input; the settings 思考模式 switch is the confirmed crash trigger under investigation. Use platform default hover visuals."
+    }
+  },
+  "release": {
+    "deploymentCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\deploy-winui.ps1",
+    "artifactRule": "The build DLL and registered loose-layout AppX DLL must have identical SHA-256 hashes."
+  }
+}

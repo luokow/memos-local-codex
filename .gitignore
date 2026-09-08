@@ -5,6 +5,9 @@ artifacts/
 llama/
 ollama/
 models/
+package-static/
+package-static-2.0.12/
+.superpowers/
 *.log
 local-chat/data/
 local-chat/diagnostics/

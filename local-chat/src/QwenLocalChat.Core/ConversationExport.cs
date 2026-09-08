@@ -86,13 +86,13 @@ public static class ConversationExport
     }
 
     public static string SuggestFileName(DateTimeOffset now)
-        => $"qwen-local-chat-{now:yyyyMMdd-HHmmss}.md";
+        => $"local-ai-chat-{now:yyyyMMdd-HHmmss}.md";
 
     public static string ToMarkdown(IReadOnlyList<ConversationTurn> turns, DateTimeOffset? exportedAt = null)
     {
         var stamp = exportedAt ?? DateTimeOffset.Now;
         var builder = new StringBuilder();
-        builder.AppendLine("# Qwen Local 对话导出");
+        builder.AppendLine("# Local AI 对话导出");
         builder.AppendLine();
         builder.AppendLine($"导出时间：{stamp:yyyy-MM-dd HH:mm:ss zzz}");
         builder.AppendLine();
@@ -118,7 +118,7 @@ public static class ConversationExport
         foreach (var item in items)
         {
             if (string.IsNullOrWhiteSpace(item.Text)) continue;
-            if (item.Label is not ("你" or "Qwen" or "SYSTEM")) continue;
+            if (item.Label is not ("你" or "SYSTEM") && !TranscriptPresentationPolicy.IsAssistant(item.Label)) continue;
             turns.Add(new ConversationTurn(item.Label, item.Text));
         }
         return turns;

@@ -1,6 +1,6 @@
 # Codex 本地 MemOS
 
-这套集成把记忆数据库、语义向量模型和 Qwen 本地大模型全部放在 D 盘。运行时不需要 MemOS、OpenAI 或其他云端 API Key。
+这套集成把记忆数据库、语义向量模型和 Qwen 本地大模型全部放在本机。运行时不需要 MemOS、OpenAI 或其他云端 API Key。源码以 MIT 开源；GGUF 权重、`llama-server` 二进制、MemOS 运行数据和 `package-static` 不入库，需在本机自行放置。
 
 ## 各组件做什么
 
@@ -43,7 +43,7 @@ Qwen Local 和 MemOS 读取同一份 `runtime/model-service.json`。两端启动
 & 'D:\codex\experiments\memos-local-codex\scripts\start-codex-with-memos.ps1' --cd 'D:\codex'
 ```
 
-需要持久配置时，可参考 `codex-mcp-fragment.toml`；当前活跃任务没有改写用户级 `C:\Users\kow\.codex\config.toml`。
+需要持久配置时，可参考 `codex-mcp-fragment.toml`；当前活跃任务没有改写用户级 `%USERPROFILE%\.codex\config.toml`。
 
 ## 验证和维护
 

@@ -65,7 +65,7 @@
               Cascadia Mono is reserved for machine-readable values (endpoint, code blocks).
             -->
             <Style x:Key="TitleTextStyle" TargetType="TextBlock">
-                <!-- Product wordmark: Segoe Variable reads fuller on Latin "Qwen Local" than YaHei SemiBold. -->
+                <!-- Product wordmark: Segoe Variable keeps the Latin product name compact and legible. -->
                 <Setter Property="FontFamily" Value="Segoe UI Variable Display" />
                 <Setter Property="FontSize" Value="24" />
                 <Setter Property="FontWeight" Value="Bold" />
@@ -107,6 +107,50 @@
                 <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
                 <Setter Property="FontSize" Value="11" />
                 <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+            </Style>
+            <Style x:Key="ComposerTitleTextStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            </Style>
+            <Style x:Key="ComposerMetaTextStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            </Style>
+            <Style x:Key="ComposerHintTextStyle" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+            </Style>
+            <Style x:Key="ComposerInputTextBoxStyle" TargetType="TextBox">
+                <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+                <Setter Property="FontSize" Value="15" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                <Setter Property="Padding" Value="4,2" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="UseSystemFocusVisuals" Value="False" />
+                <Setter Property="VerticalContentAlignment" Value="Top" />
+            </Style>
+            <Style x:Key="CompactSettingsNumberBoxStyle" TargetType="NumberBox">
+                <Setter Property="Width" Value="136" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Top" />
+            </Style>
+            <Style x:Key="CompactSettingsTextBoxStyle" TargetType="TextBox">
+                <Setter Property="Width" Value="360" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+            </Style>
+            <Style x:Key="ComposerParameterNumberBoxStyle" TargetType="NumberBox">
+                <Setter Property="MinWidth" Value="120" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="VerticalAlignment" Value="Top" />
             </Style>
             <Style x:Key="SettingsSectionTitleStyle" TargetType="TextBlock">
                 <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
@@ -164,6 +208,13 @@
                 <Setter Property="Foreground" Value="#0B0C0F" />
                 <Setter Property="UseSystemFocusVisuals" Value="False" />
                 <Setter Property="Template" Value="{StaticResource StableButtonTemplate}" />
+            </Style>
+            <Style x:Key="VideoPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Padding" Value="12,0" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="FontSize" Value="13" />
             </Style>
             <Style x:Key="CopyMessageButtonStyle" TargetType="Button">
                 <Setter Property="Width" Value="24" />

@@ -42,7 +42,7 @@ public interface IOwnedModelProcess : IAsyncDisposable
 public sealed class QwenServiceManager(
     LocalModelOptions options,
     IModelProcessLauncher launcher,
-    HttpClient? httpClient = null) : IAsyncDisposable
+    HttpClient? httpClient = null) : ILocalModelService
 {
     private readonly HttpClient _http = httpClient ?? new HttpClient(new SocketsHttpHandler { UseProxy = false });
     private readonly SemaphoreSlim _startGate = new(1, 1);
@@ -92,7 +92,7 @@ public sealed class QwenServiceManager(
                 _ownedProcess = null;
             }
             if (_ownedProcess is null && string.IsNullOrWhiteSpace(options.StartLockFile) && await IsPortOccupiedAsync(cancellationToken))
-                throw new InvalidOperationException($"端口 {options.BindHost}:{options.Port} 已被占用，但没有返回健康且身份匹配的 Qwen 服务；已停止自动启动，未终止占用端口的进程");
+                throw new InvalidOperationException($"端口 {options.BindHost}:{options.Port} 已被占用，但没有返回健康且身份匹配的文本模型服务；已停止自动启动，未终止占用端口的进程");
 
             ModelServiceStartLock? crossProcessLock = null;
             if (_ownedProcess is null && !string.IsNullOrWhiteSpace(options.StartLockFile))
@@ -129,7 +129,7 @@ public sealed class QwenServiceManager(
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (_ownedProcess.HasExited)
-                        throw new InvalidOperationException($"Qwen 服务进程已退出，请查看日志：{options.LogFile}");
+                        throw new InvalidOperationException($"文本模型服务进程已退出，请查看日志：{options.LogFile}");
                     if (await IsHealthyTargetAsync(cancellationToken))
                     {
                         await RefreshEffectiveContextSizeAsync(cancellationToken);
@@ -138,7 +138,7 @@ public sealed class QwenServiceManager(
                     }
                     await Task.Delay(250, cancellationToken);
                 }
-                throw new TimeoutException($"Qwen 服务在 {options.StartupTimeoutSeconds} 秒内未就绪，请查看日志：{options.LogFile}");
+                throw new TimeoutException($"文本模型服务在 {options.StartupTimeoutSeconds} 秒内未就绪，请查看日志：{options.LogFile}");
             }
         }
         catch
@@ -149,6 +149,40 @@ public sealed class QwenServiceManager(
         finally
         {
             _startGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Drop idle llama-server slot KV so a new Local AI thread does not inherit
+    /// the previous conversation's cached prompt. Best-effort: older servers
+    /// without /slots are ignored.
+    /// </summary>
+    public async Task<int> EraseIdleSlotsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var slotsUri = new Uri(options.HealthUri, "/slots");
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            using var response = await _http.GetAsync(slotsUri, timeout.Token);
+            if (!response.IsSuccessStatusCode) return 0;
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
+            var ids = ModelSessionCache.IdleSlotIds(document.RootElement);
+            var erased = 0;
+            foreach (var id in ids)
+            {
+                var eraseUri = new Uri(options.HealthUri, $"/slots/{id}?action=erase");
+                using var eraseTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                eraseTimeout.CancelAfter(TimeSpan.FromSeconds(2));
+                using var erase = await _http.PostAsync(eraseUri, content: null, eraseTimeout.Token);
+                if (erase.IsSuccessStatusCode) erased++;
+            }
+            return erased;
+        }
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or JsonException or IOException)
+        {
+            return 0;
         }
     }
 

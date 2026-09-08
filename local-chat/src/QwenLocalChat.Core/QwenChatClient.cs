@@ -34,7 +34,14 @@ public sealed record ChatGenerationOptions(
     /// When true, trim trailing loops/slogan tails and may abort stream early on loops.
     /// Default false — keep model text intact unless user opts in.
     /// </summary>
-    bool ClientRepetitionGuard = false)
+    bool ClientRepetitionGuard = false,
+    /// <summary>llama.cpp slot pin. null lets the server pick.</summary>
+    int? SlotId = null,
+    /// <summary>
+    /// llama.cpp prompt-cache reuse. false after switching Local AI threads so
+    /// the previous conversation's KV is not treated as a prefix of the new one.
+    /// </summary>
+    bool? CachePrompt = null)
 {
     public static ChatGenerationOptions FromSettings(
         LocalChatSettings settings,
@@ -71,6 +78,16 @@ public sealed record ChatGenerationOptions(
             ClientRepetitionGuard: settings.ClientRepetitionGuard);
     }
 
+    public static ChatGenerationOptions FromSettings(
+        LocalChatSettings settings,
+        ModelProfileCatalog catalog,
+        int maxOutputTokens,
+        bool? enableThinking = null)
+    {
+        var profile = settings.ResolveTextProfile(catalog);
+        return FromSettings(settings, profile.Service.ModelAlias, maxOutputTokens, enableThinking, profile.Service.ReasoningEnabled);
+    }
+
     /// <summary>JSON body shared by streaming and non-streaming completions.</summary>
     public object ToRequestBody(IReadOnlyList<ChatMessage> messages)
     {
@@ -101,6 +118,10 @@ public sealed record ChatGenerationOptions(
         // Cap thinking so long free-form answers still get body tokens (server may ignore unknown fields).
         if (ReasoningBudget is > 0)
             payload["reasoning_budget"] = ReasoningBudget.Value;
+        if (SlotId is int slotId)
+            payload["id_slot"] = slotId;
+        if (CachePrompt is bool cachePrompt)
+            payload["cache_prompt"] = cachePrompt;
         return payload;
     }
 }
@@ -112,7 +133,7 @@ public sealed record ChatCompletionResult(
     int? CompletionTokens,
     int ReasoningChars = 0);
 
-public sealed class QwenChatClient(Uri endpoint, HttpClient? httpClient = null) : IDisposable
+public sealed class QwenChatClient(Uri endpoint, HttpClient? httpClient = null) : ILocalChatClient
 {
     private readonly HttpClient _http = httpClient ?? new HttpClient(new SocketsHttpHandler { UseProxy = false });
 
@@ -133,7 +154,7 @@ public sealed class QwenChatClient(Uri endpoint, HttpClient? httpClient = null) 
         using var response = await _http.PostAsJsonAsync(endpoint, options.ToRequestBody(messages), timeout.Token);
         var raw = await response.Content.ReadAsStringAsync(timeout.Token);
         if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Qwen 返回 HTTP {(int)response.StatusCode}: {raw}");
+            throw new HttpRequestException($"文本模型返回 HTTP {(int)response.StatusCode}: {raw}");
 
         using var document = JsonDocument.Parse(raw);
         var choice = document.RootElement.GetProperty("choices")[0];
@@ -186,7 +207,7 @@ public sealed class QwenChatClient(Uri endpoint, HttpClient? httpClient = null) 
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(timeout.Token);
-            throw new HttpRequestException($"Qwen 返回 HTTP {(int)response.StatusCode}: {error}");
+            throw new HttpRequestException($"文本模型返回 HTTP {(int)response.StatusCode}: {error}");
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
@@ -293,7 +314,7 @@ public sealed class QwenChatClient(Uri endpoint, HttpClient? httpClient = null) 
                 + "因此回答为空。可关闭「思考模式」后点「继续」，或提高最大输出 Token 后再试。");
         }
 
-        return new InvalidOperationException("Qwen 返回了空回答");
+        return new InvalidOperationException("文本模型返回了空回答");
     }
 
     public void Dispose() => _http.Dispose();

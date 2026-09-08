@@ -66,7 +66,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
-                <RowDefinition Height="132" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="64" />
             </Grid.RowDefinitions>
 
@@ -84,37 +84,72 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                        <Border Width="40" Height="40" CornerRadius="12" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" VerticalAlignment="Center" AutomationProperties.AutomationId="AppIconMark" AutomationProperties.Name="Qwen Local 图标">
+                        <Border Width="40" Height="40" CornerRadius="12" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" VerticalAlignment="Center" AutomationProperties.AutomationId="AppIconMark" AutomationProperties.Name="Local AI 图标">
                             <Image Width="26" Height="26" Source="ms-appx:///Assets/AppIconMark.png" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <StackPanel Spacing="1" VerticalAlignment="Center">
-                            <TextBlock Text="Qwen Local" Style="{StaticResource TitleTextStyle}" />
+                            <TextBlock Text="Local AI" Style="{StaticResource TitleTextStyle}" />
                             <TextBlock x:Name="EndpointText" Text="LOCAL CORE  /  加载配置" Style="{StaticResource MetaTextStyle}" />
                         </StackPanel>
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <Border x:Name="QwenStatusBorder" CornerRadius="10" Padding="12,7" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                        <Border x:Name="QwenStatusBorder" CornerRadius="8" Padding="8,5" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                             <TextBlock x:Name="QwenStatusText" Text="• 模型检查中" Style="{StaticResource StatusTextStyle}" Foreground="{StaticResource TextPrimaryBrush}" />
                         </Border>
-                        <Border x:Name="MemosStatusBorder" CornerRadius="10" Padding="12,7" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                        <Border x:Name="VideoStatusBorder" Visibility="Collapsed" CornerRadius="8" Padding="8,5" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                            <TextBlock x:Name="VideoModelStatusText" Text="○ 视频模型未启动" Style="{StaticResource StatusTextStyle}" />
+                        </Border>
+                        <Border x:Name="MemosStatusBorder" CornerRadius="8" Padding="8,5" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                             <TextBlock x:Name="MemosStatusText" Text="○ 记忆关闭" Style="{StaticResource StatusTextStyle}" />
                         </Border>
-                        <Border x:Name="LogStatusBorder" CornerRadius="10" Padding="12,7" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                        <Border x:Name="LogStatusBorder" CornerRadius="8" Padding="8,5" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
                             <TextBlock x:Name="LogStatusText" Text="○ 日志关闭" Style="{StaticResource StatusTextStyle}" />
                         </Border>
                     </StackPanel>
                 </Grid>
 
-                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <ComboBox x:Name="SessionPicker" AutomationProperties.AutomationId="SessionPicker" AutomationProperties.Name="会话列表" MinWidth="200" MaxWidth="320" PlaceholderText="会话" SelectionChanged="SessionPicker_SelectionChanged" />
-                    <Button x:Name="NewSessionButton" AutomationProperties.AutomationId="NewSessionButton" AutomationProperties.Name="新建会话" Content="新建" Click="NewSessionButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="保存当前会话并新建空白会话；生成中会先停止再切换" />
-                    <Button x:Name="DeleteSessionButton" AutomationProperties.AutomationId="DeleteSessionButton" AutomationProperties.Name="删除当前会话" Content="删除" Click="DeleteSessionButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="删除当前会话（至少保留一个）；生成中会先停止再删除" />
-                </StackPanel>
+                <Border x:Name="ModeToolbar" Grid.Row="1" MinHeight="40" Padding="0,0,0,4" Background="Transparent" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" CornerRadius="0">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <SelectorBar Grid.Column="0" x:Name="ModeSelector" AutomationProperties.AutomationId="ModeSelector" SelectionChanged="ModeSelector_SelectionChanged" HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <SelectorBarItem x:Name="ChatModeItem" Text="聊天" />
+                            <SelectorBarItem x:Name="VideoModeItem" Text="视频" />
+                            <SelectorBarItem x:Name="HanhuaModeItem" Text="汉化" />
+                        </SelectorBar>
+                        <Grid Grid.Column="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel x:Name="ChatToolsHost" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <ComboBox x:Name="SessionPicker" AutomationProperties.AutomationId="SessionPicker" AutomationProperties.Name="会话列表" MinWidth="200" MaxWidth="320" PlaceholderText="会话" SelectionChanged="SessionPicker_SelectionChanged" />
+                                <Button x:Name="NewSessionButton" AutomationProperties.AutomationId="NewSessionButton" AutomationProperties.Name="新建会话" Content="新建" Click="NewSessionButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="保存当前会话并新建空白会话；切换不会中断其它会话的生成" />
+                                <Button x:Name="DeleteSessionButton" AutomationProperties.AutomationId="DeleteSessionButton" AutomationProperties.Name="删除当前会话" Content="删除" Click="DeleteSessionButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="删除当前会话（至少保留一个）；生成中会先停止再删除" />
+                            </StackPanel>
+                            <StackPanel x:Name="VideoSessionToolsHost" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Visibility="Collapsed">
+                                <ComboBox x:Name="VideoSessionPicker" AutomationProperties.AutomationId="VideoSessionPicker" AutomationProperties.Name="视频窗口列表" MinWidth="200" MaxWidth="320" PlaceholderText="视频窗口" SelectionChanged="VideoSessionPicker_SelectionChanged" />
+                                <Button x:Name="NewVideoSessionButton" AutomationProperties.AutomationId="NewVideoSessionButton" AutomationProperties.Name="新建视频窗口" Content="新建" Click="NewVideoSessionButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="保存当前窗口并新建空白窗口；正在生成的任务留在原窗口" />
+                                <Button x:Name="DeleteVideoSessionButton" AutomationProperties.AutomationId="DeleteVideoSessionButton" AutomationProperties.Name="删除当前视频窗口" Content="删除" Click="DeleteVideoSessionButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="删除当前视频窗口（至少保留一个）；若该窗口正在生成会先停止" />
+                            </StackPanel>
+                            <StackPanel x:Name="TextModelToolsHost" Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock x:Name="TextModelSummaryText" Text="文本模型  加载档案" Style="{StaticResource MetaTextStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                <Button x:Name="StartTextModelPageButton" AutomationProperties.AutomationId="StartTextModelPageButton" AutomationProperties.Name="启动当前文本模型" Content="启动" Click="StartTextModelPageButton_Click" Style="{StaticResource ToolbarButtonStyle}" />
+                            </StackPanel>
+                            <StackPanel x:Name="VideoToolsHost" Grid.Column="1" Visibility="Collapsed" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                <TextBlock x:Name="VideoModelSummaryText" Text="视频模型  加载档案" Style="{StaticResource MetaTextStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                <Button x:Name="StartVideoModelPageButton" AutomationProperties.AutomationId="StartVideoModelPageButton" AutomationProperties.Name="启动当前视频模型" Content="启动" Click="StartVideoModelPageButton_Click" Style="{StaticResource ToolbarButtonStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
 
                 <TextBlock x:Name="NoticeText" Grid.Row="2" Text="正在检查本地模型服务；长期记忆和磁盘日志默认关闭。" Style="{StaticResource StatusTextStyle}" TextTrimming="CharacterEllipsis" />
             </Grid>
 
-            <Border Grid.Row="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="14" AutomationProperties.AutomationId="TranscriptShell">
+            <Border x:Name="ChatTranscriptHost" Grid.Row="1" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="14" AutomationProperties.AutomationId="TranscriptShell">
                 <ListView x:Name="TranscriptList" AutomationProperties.AutomationId="TranscriptList" AutomationProperties.Name="聊天记录" ItemsSource="{x:Bind TranscriptItems, Mode=OneWay}" SelectionMode="None" IsItemClickEnabled="False" IsTabStop="False" Padding="8" Background="{StaticResource SurfaceBrush}" BorderBrush="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
@@ -133,18 +168,30 @@
                                     <Button Visibility="{x:Bind CopyVisibility}" AutomationProperties.AutomationId="CopyMessageButton" AutomationProperties.Name="复制整条回复" Tag="{x:Bind Text}" Click="CopyMessageButton_Click" Style="{StaticResource CopyMessageButtonStyle}" ToolTipService.ToolTip="复制整条回复">
                                         <FontIcon Glyph="&#xE8C8;" FontSize="11" />
                                     </Button>
+                                    <Button Visibility="{x:Bind EditVisibility, Mode=OneWay}" AutomationProperties.AutomationId="EditUserMessageButton" AutomationProperties.Name="编辑并重新生成" Tag="{x:Bind}" Click="EditUserMessageButton_Click" Style="{StaticResource CopyMessageButtonStyle}" ToolTipService.ToolTip="编辑这条提问并重新生成">
+                                        <FontIcon Glyph="&#xE70F;" FontSize="11" />
+                                    </Button>
                                 </StackPanel>
                                 <TextBlock Text="{x:Bind Text, Mode=OneWay}" Visibility="{x:Bind StreamingVisibility, Mode=OneWay}" Style="{StaticResource BodyTextStyle}" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
                                 <local:MarkdownPresenter Text="{x:Bind Text, Mode=OneWay}" Visibility="{x:Bind FormattedVisibility, Mode=OneWay}" />
+                                <StackPanel Visibility="{x:Bind EditingVisibility, Mode=OneWay}" Spacing="8">
+                                    <TextBox Text="{x:Bind EditText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" Style="{StaticResource ComposerInputTextBoxStyle}" AutomationProperties.AutomationId="EditUserMessageInput" AutomationProperties.Name="编辑提问" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                        <Button Content="取消" Click="CancelEditUserMessageButton_Click" Tag="{x:Bind}" Style="{StaticResource ToolbarButtonStyle}" AutomationProperties.AutomationId="CancelEditUserMessageButton" />
+                                        <Button Content="重新生成" Click="RegenerateUserMessageButton_Click" Tag="{x:Bind}" Style="{StaticResource VideoPrimaryButtonStyle}" AutomationProperties.AutomationId="RegenerateUserMessageButton" />
+                                    </StackPanel>
+                                    <TextBlock Text="将删除这条之后的对话，并用修改后的提问重新生成。" Style="{StaticResource ComposerHintTextStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
                             </StackPanel>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
             </Border>
 
-            <Border Grid.Row="2" Margin="0,10,0,10" Padding="14,12,12,10" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="18">
-                <Grid RowSpacing="8" ColumnSpacing="12">
+            <Border x:Name="ChatComposerHost" Grid.Row="2" Margin="0,10,0,10" Padding="14,12,12,10" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="18">
+                <Grid RowSpacing="6" ColumnSpacing="12">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
@@ -152,23 +199,62 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBox x:Name="InputBox" Grid.Row="0" Grid.Column="0" AutomationProperties.AutomationId="MessageInput" AutomationProperties.Name="消息输入框" AcceptsReturn="True" TextWrapping="Wrap" PlaceholderText="输入消息" MinHeight="52" MaxHeight="104" Padding="4,2" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" Foreground="{StaticResource TextPrimaryBrush}" UseSystemFocusVisuals="False" FontFamily="Microsoft YaHei UI" FontSize="15" ScrollViewer.VerticalScrollBarVisibility="Auto" PreviewKeyDown="InputBox_PreviewKeyDown" />
-                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                    <TextBlock x:Name="ChatPromptLabel" Text="聊天消息" Style="{StaticResource ComposerTitleTextStyle}" VerticalAlignment="Center" />
+                    <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="18" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <TextBlock x:Name="ChatComposerMetaText" Text="上下文  输出上限" Style="{StaticResource ComposerMetaTextStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <Button x:Name="AttachChatFileButton" AutomationProperties.AutomationId="AttachChatFileButton" AutomationProperties.Name="添加聊天附件" Content="附件" Click="AttachChatFileButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="添加文件；默认仅文本，可在设置里放开类型" />
+                        <Button x:Name="ExpandChatInputButton" AutomationProperties.AutomationId="ExpandChatInputButton" AutomationProperties.Name="展开聊天输入" Content="展开" Click="ExpandChatInputButton_Click" Style="{StaticResource ToolbarButtonStyle}" />
+                    </StackPanel>
+                    <Grid Grid.Row="1" Grid.Column="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBox x:Name="InputBox" AutomationProperties.AutomationId="MessageInput" AutomationProperties.Name="消息输入框" AcceptsReturn="True" TextWrapping="Wrap" PlaceholderText="输入消息" MinHeight="78" MaxHeight="188" Style="{StaticResource ComposerInputTextBoxStyle}" ScrollViewer.VerticalScrollBarVisibility="Auto" PreviewKeyDown="InputBox_PreviewKeyDown" />
+                        <GridView
+                            x:Name="ChatAttachmentsHost"
+                            Grid.Row="1"
+                            AutomationProperties.AutomationId="ChatAttachmentsHost"
+                            AutomationProperties.Name="已选聊天附件"
+                            SelectionMode="None"
+                            IsItemClickEnabled="False"
+                            IsSwipeEnabled="False"
+                            IsTabStop="False"
+                            Padding="0"
+                            Margin="0,4,0,0"
+                            HorizontalAlignment="Stretch"
+                            Visibility="Collapsed">
+                            <GridView.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <ItemsWrapGrid Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </GridView.ItemsPanel>
+                            <GridView.ItemContainerStyle>
+                                <Style TargetType="GridViewItem">
+                                    <Setter Property="MinWidth" Value="0" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0,0,8,4" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                </Style>
+                            </GridView.ItemContainerStyle>
+                        </GridView>
+                    </Grid>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" HorizontalAlignment="Right">
                         <Button x:Name="ContinueButton" AutomationProperties.AutomationId="ContinueButton" AutomationProperties.Name="继续生成" Content="继续" Click="ContinueButton_Click" Style="{StaticResource ComposerSecondaryButtonStyle}" Visibility="Collapsed" ToolTipService.ToolTip="从上次中断处继续生成，或续写长文下一段" />
                         <Button x:Name="SendButton" AutomationProperties.AutomationId="SendButton" AutomationProperties.Name="发送消息" Content="发送" Click="SendButton_Click" Style="{StaticResource PrimaryButtonStyle}" />
                     </StackPanel>
-                    <!-- Spacing alone separates shortcuts (no · glyphs). -->
-                    <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="14" Margin="4,2,0,0">
-                        <TextBlock Text="Enter 发送" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
-                        <TextBlock Text="Shift+Enter 换行" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
-                        <TextBlock Text="↑↓ 历史" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
-                        <TextBlock Text="生成中点发送可停止" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
-                        <TextBlock Text="「继续」=中断续写 ·「下一段」=长文分段" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" Opacity="0.9" />
+                    <!-- Spacing alone separates shortcuts. -->
+                    <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="22" Margin="4,0,0,0">
+                        <TextBlock Text="Enter 发送" Style="{StaticResource ComposerHintTextStyle}" VerticalAlignment="Center" />
+                        <TextBlock Text="Shift+Enter 换行" Style="{StaticResource ComposerHintTextStyle}" VerticalAlignment="Center" />
+                        <TextBlock Text="↑↓ 历史" Style="{StaticResource ComposerHintTextStyle}" VerticalAlignment="Center" />
+                        <TextBlock Text="展开编辑长文本" Style="{StaticResource ComposerHintTextStyle}" VerticalAlignment="Center" />
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="3" ColumnSpacing="12">
+            <Grid x:Name="ChatFooterHost" Grid.Row="3" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -191,6 +277,14 @@
                     </Button>
                 </StackPanel>
             </Grid>
+
+            <Grid x:Name="VideoModeHost" Grid.Row="1" Grid.RowSpan="3" Visibility="Collapsed" Background="Transparent" Padding="0,0,0,2">
+                <local:VideoGenerationPanel x:Name="VideoPanel" />
+            </Grid>
+
+            <Grid x:Name="HanhuaModeHost" Grid.Row="1" Grid.RowSpan="3" Visibility="Collapsed" Background="Transparent" Padding="0,0,0,2">
+                <local:HanhuaPanel x:Name="HanhuaPanel" />
+            </Grid>
         </Grid>
 
         <local:RuntimeSettingsPanel
@@ -199,6 +293,61 @@
             IsEnabled="False"
             IsHitTestVisible="False"
             Opacity="0" />
+
+        <Grid x:Name="ExpandedEditorOverlay" Grid.RowSpan="4" Visibility="Collapsed" Background="#CC000000" IsHitTestVisible="False">
+            <Border Width="720" Height="520" MaxWidth="720" MaxHeight="560" Margin="28" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="20,18" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="16">
+                <Grid RowSpacing="14">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <StackPanel Spacing="4">
+                        <TextBlock x:Name="ExpandedEditorTitle" Text="展开编辑" FontFamily="Microsoft YaHei UI" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
+                        <TextBlock x:Name="ExpandedEditorHint" Text="Enter 发送    Shift+Enter 换行" Style="{StaticResource CaptionTextStyle}" />
+                    </StackPanel>
+                    <Grid Grid.Row="1" RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBox x:Name="ExpandedEditorText" AutomationProperties.AutomationId="ExpandedEditorText" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Microsoft YaHei UI" FontSize="15" Padding="14,12" VerticalContentAlignment="Top" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" PreviewKeyDown="ExpandedEditorText_PreviewKeyDown" />
+                        <ListView
+                            x:Name="ExpandedMentionList"
+                            Grid.Row="1"
+                            AutomationProperties.AutomationId="ExpandedMentionList"
+                            AutomationProperties.Name="插入参考标签"
+                            SelectionMode="Single"
+                            IsItemClickEnabled="True"
+                            ItemClick="ExpandedMentionList_ItemClick"
+                            MaxHeight="140"
+                            Visibility="Collapsed"
+                            Background="{StaticResource SurfaceBrush}"
+                            BorderBrush="{StaticResource StrongBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="4">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Display}" FontFamily="Microsoft YaHei UI" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                        <local:VideoPromptTemplatePicker
+                            x:Name="ExpandedTemplatePicker"
+                            Grid.Row="2"
+                            Visibility="Collapsed"
+                            InsertRequested="ExpandedTemplatePicker_InsertRequested"
+                            Cancelled="ExpandedTemplatePicker_Cancelled" />
+                    </Grid>
+                    <Grid Grid.Row="2" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ExpandedEditorFooterHint" Text="编辑区域会随窗口居中显示" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
+                        <Button x:Name="ExpandedInsertTemplateButton" Grid.Column="1" Content="插入模板" Click="ExpandedInsertTemplateButton_Click" Style="{StaticResource ToolbarButtonStyle}" Visibility="Collapsed" />
+                        <Button x:Name="ExpandedEditorCopyButton" Grid.Column="2" Content="复制" Click="ExpandedEditorCopyButton_Click" Style="{StaticResource ToolbarButtonStyle}" Visibility="Collapsed" />
+                        <Button x:Name="ExpandedEditorCloseButton" Grid.Column="3" Content="收起" Click="CloseExpandedEditorButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                        <Button x:Name="ExpandedEditorActionButton" Grid.Column="4" Content="发送" Click="ExpandedEditorActionButton_Click" Style="{StaticResource PrimaryButtonStyle}" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
 
         <!-- Avoid ContentDialog (known WinUI native crash path). Compact actions, not oversized cards. -->
         <Grid
@@ -221,7 +370,7 @@
                     <StackPanel Spacing="4">
                         <TextBlock
                             x:Name="ClosePromptTitle"
-                            Text="退出 Qwen Local"
+                            Text="退出 Local AI"
                             FontFamily="Microsoft YaHei UI"
                             FontSize="16"
                             FontWeight="SemiBold"
@@ -249,15 +398,15 @@
                         <Button
                             x:Name="CloseStopModelButton"
                             AutomationProperties.AutomationId="CloseStopModelButton"
-                            Content="停止模型并退出"
+                            Content="退出并关闭模型服务"
                             Click="CloseStopModelButton_Click"
                             Style="{StaticResource PrimaryButtonStyle}"
                             HorizontalAlignment="Stretch"
-                            ToolTipService.ToolTip="结束本机 llama 服务" />
+                            ToolTipService.ToolTip="退出软件并关闭本地模型服务" />
                         <Button
                             x:Name="CloseKeepModelButton"
                             AutomationProperties.AutomationId="CloseKeepModelButton"
-                            Content="仅退出软件"
+                            Content="仅退出"
                             Click="CloseKeepModelButton_Click"
                             Style="{StaticResource SecondaryButtonStyle}"
                             HorizontalAlignment="Stretch"

@@ -13,19 +13,33 @@
         <Grid Grid.Row="0">
             <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="14">
                 <Grid>
-                    <ListView x:Name="JobLogList" AutomationProperties.AutomationId="HanhuaJobLog" AutomationProperties.Name="汉化任务日志" SelectionMode="None" IsTabStop="False" Padding="8" Background="Transparent" BorderBrush="Transparent">
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="Padding" Value="0" />
-                                <Setter Property="Margin" Value="0,0,0,6" />
-                                <Setter Property="Background" Value="Transparent" />
-                                <Setter Property="IsTabStop" Value="False" />
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                    </ListView>
-                    <Image x:Name="ResultPreview" AutomationProperties.AutomationId="HanhuaResultPreview" Stretch="Uniform" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" MaxWidth="220" MaxHeight="160" Margin="12" />
-                    <TextBlock x:Name="HanhuaEmptyState" Text="选择游戏或图片目录后开始" Style="{StaticResource StatusTextStyle}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="任务日志" Style="{StaticResource ComposerTitleTextStyle}" Margin="4,0,4,8" />
+                    <Grid Grid.Row="1">
+                        <ListView x:Name="JobLogList" AutomationProperties.AutomationId="HanhuaJobLog" AutomationProperties.Name="汉化任务日志" SelectionMode="None" IsTabStop="False" Padding="8" Background="Transparent" BorderBrush="Transparent">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0,0,0,6" />
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="IsTabStop" Value="False" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                        </ListView>
+                        <Image x:Name="ResultPreview" AutomationProperties.AutomationId="HanhuaResultPreview" Stretch="Uniform" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" MaxWidth="220" MaxHeight="160" Margin="12" />
+                        <StackPanel x:Name="HanhuaEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6" MaxWidth="420">
+                            <TextBlock
+                                x:Name="HanhuaEmptyStateHint"
+                                Text="选含 Game.exe 的目录，点开始汉化即可。会自动复制、抽字、翻译、回写。不用点右上角启动。"
+                                Style="{StaticResource StatusTextStyle}"
+                                TextWrapping="Wrap"
+                                TextAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>
@@ -35,6 +49,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -74,6 +89,7 @@
                     <Button Grid.Column="1" x:Name="PickFolderButton" AutomationProperties.AutomationId="HanhuaPickFolderButton" AutomationProperties.Name="选择目录" Content="选择目录" Click="PickFolderButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Center" />
                     <Button Grid.Column="2" x:Name="ComposerStartButton" AutomationProperties.AutomationId="HanhuaComposerStartButton" AutomationProperties.Name="开始汉化" Content="开始汉化" Click="StartOrCancel_Click" Style="{StaticResource VideoPrimaryButtonStyle}" VerticalAlignment="Center" />
                 </Grid>
+                <TextBlock x:Name="HanhuaComposerHint" Grid.Row="2" Grid.ColumnSpan="2" Text="自动四步：复制 → 抽字 → 翻译 → 回写。本机 Qwen 会自动启动。" Style="{StaticResource ComposerHintTextStyle}" Margin="4,2,0,0" />
             </Grid>
         </Border>
 
@@ -93,7 +109,6 @@
                     <Button x:Name="HanhuaSettingsButton" AutomationProperties.AutomationId="HanhuaSettingsButton" AutomationProperties.Name="模型设置" Content="设置" Click="SettingsButton_Click" Style="{StaticResource ToolbarButtonStyle}" />
                     <Button x:Name="OpenHanhuaOutputButton" AutomationProperties.AutomationId="OpenHanhuaOutputButton" AutomationProperties.Name="打开汉化结果" Content="打开结果" Click="OpenOutputButton_Click" IsEnabled="False" Style="{StaticResource ToolbarButtonStyle}" />
                     <Button x:Name="CancelHanhuaButton" AutomationProperties.AutomationId="CancelHanhuaButton" AutomationProperties.Name="取消汉化" Content="取消" Click="StartOrCancel_Click" Visibility="Collapsed" Style="{StaticResource ToolbarButtonStyle}" />
-                    <Button x:Name="StartHanhuaButton" AutomationProperties.AutomationId="StartHanhuaButton" AutomationProperties.Name="开始汉化" Content="开始汉化" Click="StartOrCancel_Click" Style="{StaticResource VideoPrimaryButtonStyle}" />
                 </StackPanel>
             </Grid>
         </Border>

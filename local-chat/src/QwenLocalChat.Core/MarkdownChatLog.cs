@@ -23,7 +23,7 @@ public sealed class MarkdownChatLog(string logsRoot, string shortSessionId, Func
                 $"session-{timestamp:yyyyMMdd-HHmmss}-{_safeSessionId}.md");
         }
 
-        var entry = $"## {timestamp:yyyy-MM-dd HH:mm:ss zzz}\n\n### 你\n\n{userMessage}\n\n### Qwen\n\n{assistantMessage}\n\n---\n\n";
+        var entry = $"## {timestamp:yyyy-MM-dd HH:mm:ss zzz}\n\n### 你\n\n{userMessage}\n\n### {TranscriptPresentationPolicy.AssistantLabel}\n\n{assistantMessage}\n\n---\n\n";
         File.AppendAllText(CurrentPath, entry, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 }

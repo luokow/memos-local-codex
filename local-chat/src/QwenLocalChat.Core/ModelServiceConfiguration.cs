@@ -235,7 +235,7 @@ public sealed class ModelServiceConfigStore(string projectRoot, string configPat
     {
         if (File.Exists(ConfigPath)) return new(Load(), false);
         if (!File.Exists(legacySettingsPath))
-            throw new FileNotFoundException("共享模型服务配置不存在，且没有可迁移的 Qwen Local 设置", legacySettingsPath);
+            throw new FileNotFoundException("共享模型服务配置不存在，且没有可迁移的本地模型设置", legacySettingsPath);
 
         using var document = JsonDocument.Parse(File.ReadAllText(legacySettingsPath, Encoding.UTF8));
         var root = document.RootElement;

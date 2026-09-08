@@ -67,6 +67,12 @@ test("launch arguments come entirely from shared config", () => {
     "--jinja",
     "--parallel", "2",
     "--kv-unified",
+    "--flash-attn", "on",
+    "--cache-type-k", "q8_0",
+    "--cache-type-v", "q8_0",
+    "--cache-ram", "1024",
+    "--fit-target", "512",
+    "--spec-type", "ngram-mod",
   ]);
 });
 

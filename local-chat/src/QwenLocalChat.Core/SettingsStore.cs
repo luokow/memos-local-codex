@@ -49,10 +49,124 @@ public static class SettingsNumberInput
         => DryMultiplier(Decimal(visibleText, committedValue));
 }
 
+/// <summary>Persistent video request settings. Model-specific limits come from the selected video profile.</summary>
+public sealed record VideoGenerationSettings
+{
+    public const int MinimumDimension = 64;
+    public const int MaximumDimension = 4096;
+
+    [JsonPropertyName("width")]
+    public int Width { get; init; } = 864;
+
+    [JsonPropertyName("height")]
+    public int Height { get; init; } = 480;
+
+    [JsonPropertyName("duration_seconds")]
+    public int DurationSeconds { get; init; } = 10;
+
+    [JsonPropertyName("steps")]
+    public int Steps { get; init; } = 20;
+
+    [JsonPropertyName("seed")]
+    public long Seed { get; init; }
+
+    [JsonPropertyName("random_seed")]
+    public bool RandomSeed { get; init; } = true;
+
+    [JsonPropertyName("output_format")]
+    public string OutputFormat { get; init; } = "mp4";
+
+    [JsonPropertyName("video_codec")]
+    public string VideoCodec { get; init; } = "auto";
+
+    public static VideoGenerationSettings SafeDefaults { get; } = new();
+
+    public VideoGenerationSettings Normalized()
+        => this with
+        {
+            Width = Math.Clamp(Width, MinimumDimension, MaximumDimension),
+            Height = Math.Clamp(Height, MinimumDimension, MaximumDimension),
+            DurationSeconds = Math.Clamp(DurationSeconds, 1, 300),
+            Steps = Math.Clamp(Steps, 1, 1000),
+            Seed = Math.Clamp(Seed, 0, int.MaxValue),
+            OutputFormat = string.IsNullOrWhiteSpace(OutputFormat) ? "mp4" : OutputFormat.Trim().ToLowerInvariant(),
+            VideoCodec = string.IsNullOrWhiteSpace(VideoCodec) ? "auto" : VideoCodec.Trim().ToLowerInvariant(),
+        };
+
+    public IReadOnlyList<string> Validate()
+    {
+        var errors = new List<string>();
+        if (Width is < MinimumDimension or > MaximumDimension) errors.Add("视频宽度必须在 64 到 4096 之间");
+        if (Height is < MinimumDimension or > MaximumDimension) errors.Add("视频高度必须在 64 到 4096 之间");
+        if (DurationSeconds is < 1 or > 300) errors.Add("视频时长必须在 1 到 300 秒之间");
+        if (Steps is < 1 or > 1000) errors.Add("视频步数必须在 1 到 1000 之间");
+        if (Seed is < 0 or > int.MaxValue) errors.Add("固定种子必须在 0 到 2147483647 之间");
+        if (OutputFormat is not ("auto" or "mp4")) errors.Add("视频输出格式必须是自动或 MP4");
+        if (VideoCodec is not ("auto" or "h264")) errors.Add("视频编码必须是自动或 H.264");
+        return errors;
+    }
+}
+
+/// <summary>
+/// Optional values for one video job. Applying them creates a new complete request and never
+/// mutates or persists the global defaults supplied by the caller.
+/// </summary>
+public sealed record VideoGenerationOverrides
+{
+    public int? Width { get; init; }
+    public int? Height { get; init; }
+    public int? DurationSeconds { get; init; }
+    public int? Steps { get; init; }
+    public long? Seed { get; init; }
+    public bool? RandomSeed { get; init; }
+
+    public VideoGenerationSettings ApplyTo(VideoGenerationSettings defaults)
+    {
+        ArgumentNullException.ThrowIfNull(defaults);
+        return defaults with
+        {
+            Width = Width ?? defaults.Width,
+            Height = Height ?? defaults.Height,
+            DurationSeconds = DurationSeconds ?? defaults.DurationSeconds,
+            Steps = Steps ?? defaults.Steps,
+            Seed = Seed ?? defaults.Seed,
+            RandomSeed = RandomSeed ?? defaults.RandomSeed,
+        };
+    }
+}
+
+public static class StartupModelSelection
+{
+    public const string None = "none";
+    public const string Text = "text";
+    public const string Video = "video";
+
+    public static string Normalize(string? value)
+        => value is None or Video ? value : Text;
+}
+
+public sealed record StartupModelPlan(
+    string Mode,
+    bool StartTextModel,
+    bool StartVideoModel,
+    string? ChatNotice)
+{
+    public static StartupModelPlan Resolve(string? selection)
+        => StartupModelSelection.Normalize(selection) switch
+        {
+            StartupModelSelection.Video => new(StartupModelSelection.Video, false, true, null),
+            StartupModelSelection.None => new(StartupModelSelection.None, false, false, "已按设置打开客户端，未自动启动模型。"),
+            _ => new(StartupModelSelection.Text, true, false, "正在启动当前文本模型…"),
+        };
+}
+
 public sealed record LocalChatSettings
 {
     public const string DefaultModelAlias = "local-model";
     public const string DefaultModelPath = "";
+    public const string DefaultHanhuaPackRoot = @"D:\grok\内嵌汉化";
+    public const string DefaultHanhuaPythonExe = @"C:\Users\kow\AppData\Local\Programs\Python\Python312\python.exe";
+    public const string DefaultHanhuaMitRoot = @"D:\grok\tools\manga-image-translator";
 
     // Neutral sampling by default so free-form quality stays natural.
     // Stronger anti-rep (freq/DRY/…) is opt-in via settings when long loops reappear.
@@ -78,6 +192,18 @@ public sealed record LocalChatSettings
 
     [JsonPropertyName("save_chat_logs")]
     public bool SaveChatLogs { get; init; }
+
+    [JsonPropertyName("enforce_text_video_model_exclusivity")]
+    public bool EnforceTextVideoModelExclusivity { get; init; } = true;
+
+    [JsonPropertyName("selected_text_profile_id")]
+    public string? SelectedTextProfileId { get; init; }
+
+    [JsonPropertyName("selected_video_profile_id")]
+    public string? SelectedVideoProfileId { get; init; }
+
+    [JsonPropertyName("startup_model")]
+    public string StartupModel { get; init; } = StartupModelSelection.Text;
 
     /// <summary>Per-request generation cap.</summary>
     [JsonPropertyName("max_output_tokens")]
@@ -183,6 +309,29 @@ public sealed record LocalChatSettings
     [JsonPropertyName("session_sort_mode")]
     public string SessionSortMode { get; init; } = SessionSortModes.Created;
 
+    [JsonPropertyName("video_generation")]
+    public VideoGenerationSettings VideoGeneration { get; init; } = VideoGenerationSettings.SafeDefaults;
+
+    [JsonPropertyName("video_prompt_phrases")]
+    public VideoPromptTemplatePhrases VideoPromptPhrases { get; init; } = VideoPromptTemplatePhrases.OfficialDefaults;
+
+    /// <summary>Chat composer attachments. Default is text files only; other kinds are picker reservations.</summary>
+    [JsonPropertyName("chat_attachments")]
+    public ChatAttachmentPolicy ChatAttachments { get; init; } = ChatAttachmentPolicy.SafeDefaults;
+
+    [JsonPropertyName("hanhua_pack_root")]
+    public string HanhuaPackRoot { get; init; } = DefaultHanhuaPackRoot;
+
+    [JsonPropertyName("hanhua_python_exe")]
+    public string HanhuaPythonExe { get; init; } = DefaultHanhuaPythonExe;
+
+    [JsonPropertyName("hanhua_mit_root")]
+    public string HanhuaMitRoot { get; init; } = DefaultHanhuaMitRoot;
+
+    /// <summary><c>local</c> or <c>aliyun</c>. Unknown values normalize to local.</summary>
+    [JsonPropertyName("hanhua_engine")]
+    public string HanhuaEngine { get; init; } = HanhuaEngineCodec.Local;
+
     public static LocalChatSettings SafeDefaults { get; } = new();
 
     public static LocalChatSettings ResetToDefaults() => SafeDefaults with { };
@@ -190,8 +339,12 @@ public sealed record LocalChatSettings
     public SessionSortMode ResolveSessionSortMode()
         => SessionSortModes.Parse(SessionSortMode);
 
+    public TextModelProfile ResolveTextProfile(ModelProfileCatalog catalog)
+        => catalog.Resolve(SelectedTextProfileId);
+
     public bool RequiresModelRestartComparedWith(LocalChatSettings other)
-        => ContextSize != other.ContextSize
+        => !string.Equals(SelectedTextProfileId, other.SelectedTextProfileId, StringComparison.Ordinal)
+           || ContextSize != other.ContextSize
            || GpuLayers != other.GpuLayers
            || ParallelSlots != other.ParallelSlots
            || ReasoningEnabled != other.ReasoningEnabled
@@ -212,13 +365,27 @@ public sealed record LocalChatSettings
             PresencePenalty = SettingsNumberInput.OpenAiPenalty(PresencePenalty),
             RepeatPenalty = SettingsNumberInput.RepeatPenalty(RepeatPenalty),
             DryMultiplier = SettingsNumberInput.DryMultiplier(DryMultiplier),
+            StartupModel = StartupModelSelection.Normalize(StartupModel),
+            VideoGeneration = (VideoGeneration ?? VideoGenerationSettings.SafeDefaults).Normalized(),
+            VideoPromptPhrases = (VideoPromptPhrases ?? VideoPromptTemplatePhrases.OfficialDefaults).WithDefaults(),
+            ChatAttachments = (ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults).Normalized(),
+            HanhuaPackRoot = CoalesceHanhuaPath(HanhuaPackRoot, DefaultHanhuaPackRoot),
+            HanhuaPythonExe = CoalesceHanhuaPath(HanhuaPythonExe, DefaultHanhuaPythonExe),
+            HanhuaMitRoot = CoalesceHanhuaPath(HanhuaMitRoot, DefaultHanhuaMitRoot),
+            HanhuaEngine = HanhuaEngineCodec.ToJson(HanhuaEngineCodec.Parse(HanhuaEngine)),
         };
+
+    public static string CoalesceHanhuaPath(string? value, string fallback)
+        => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
     public bool IsSameAs(LocalChatSettings other)
     {
         var left = Normalized();
         var right = other.Normalized();
         return left.MaxOutputTokens == right.MaxOutputTokens
+               && string.Equals(left.SelectedTextProfileId, right.SelectedTextProfileId, StringComparison.Ordinal)
+               && string.Equals(left.SelectedVideoProfileId, right.SelectedVideoProfileId, StringComparison.Ordinal)
+               && string.Equals(left.StartupModel, right.StartupModel, StringComparison.Ordinal)
                && left.Temperature == right.Temperature
                && left.FrequencyPenalty == right.FrequencyPenalty
                && left.PresencePenalty == right.PresencePenalty
@@ -244,11 +411,29 @@ public sealed record LocalChatSettings
                && left.AutoStartOnDemand == right.AutoStartOnDemand
                && left.UseMemos == right.UseMemos
                && left.SaveChatLogs == right.SaveChatLogs
+               && left.EnforceTextVideoModelExclusivity == right.EnforceTextVideoModelExclusivity
                && left.OnboardingSeen == right.OnboardingSeen
                && string.Equals(
                    SessionSortModes.Normalize(left.SessionSortMode),
                    SessionSortModes.Normalize(right.SessionSortMode),
-                   StringComparison.Ordinal);
+                   StringComparison.Ordinal)
+               && left.VideoGeneration == right.VideoGeneration
+               && left.VideoPromptPhrases == right.VideoPromptPhrases
+               && left.ChatAttachments == right.ChatAttachments
+               && string.Equals(left.HanhuaPackRoot, right.HanhuaPackRoot, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.HanhuaPythonExe, right.HanhuaPythonExe, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.HanhuaMitRoot, right.HanhuaMitRoot, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.HanhuaEngine, right.HanhuaEngine, StringComparison.Ordinal);
+    }
+
+    public bool HanhuaFieldsChanged(LocalChatSettings previous)
+    {
+        var left = Normalized();
+        var right = previous.Normalized();
+        return !string.Equals(left.HanhuaPackRoot, right.HanhuaPackRoot, StringComparison.OrdinalIgnoreCase)
+               || !string.Equals(left.HanhuaPythonExe, right.HanhuaPythonExe, StringComparison.OrdinalIgnoreCase)
+               || !string.Equals(left.HanhuaMitRoot, right.HanhuaMitRoot, StringComparison.OrdinalIgnoreCase)
+               || !string.Equals(left.HanhuaEngine, right.HanhuaEngine, StringComparison.Ordinal);
     }
 
     public string DescribeSaveResult(LocalChatSettings previous, bool modelOwnedByWindow)
@@ -260,8 +445,12 @@ public sealed record LocalChatSettings
         if (!restart)
         {
             if (generationBits.Count == 0)
+            {
+                if (HanhuaFieldsChanged(previous))
+                    return "设置已保存。【即时】汉化路径或引擎已更新。";
                 return "设置已保存。【即时】无生成参数变化；下次对话沿用当前值。";
-            return $"设置已保存。【即时·下次对话生效】{string.Join("、", generationBits)}。";
+            }
+            return $"设置已保存。【即时生效，下次对话使用】{string.Join("、", generationBits)}。";
         }
 
         var genPart = generationBits.Count > 0
@@ -301,11 +490,11 @@ public sealed record LocalChatSettings
         if (left.StreamResponses != right.StreamResponses)
             bits.Add(left.StreamResponses ? "流式开" : "流式关");
         if (left.AutoTightenOutputTokens != right.AutoTightenOutputTokens)
-            bits.Add(left.AutoTightenOutputTokens ? "按字数收紧·开" : "按字数收紧·关");
+            bits.Add(left.AutoTightenOutputTokens ? "按字数收紧：开" : "按字数收紧：关");
         if (left.SegmentedLongForm != right.SegmentedLongForm)
-            bits.Add(left.SegmentedLongForm ? "长文分段·开" : "长文分段·关");
+            bits.Add(left.SegmentedLongForm ? "长文分段：开" : "长文分段：关");
         if (left.ClientRepetitionGuard != right.ClientRepetitionGuard)
-            bits.Add(left.ClientRepetitionGuard ? "输出去重·开" : "输出去重·关");
+            bits.Add(left.ClientRepetitionGuard ? "输出去重：开" : "输出去重：关");
         if (left.RequestTimeoutSeconds != right.RequestTimeoutSeconds)
             bits.Add($"超时 {left.RequestTimeoutSeconds}s");
         if (left.MaxHistoryRounds != right.MaxHistoryRounds)
@@ -313,12 +502,35 @@ public sealed record LocalChatSettings
         if (left.MemosTopK != right.MemosTopK)
             bits.Add("MemOS 召回");
         if (left.AutoStartOnDemand != right.AutoStartOnDemand)
-            bits.Add(left.AutoStartOnDemand ? "按需启动·开" : "按需启动·关");
+            bits.Add(left.AutoStartOnDemand ? "按需启动：开" : "按需启动：关");
+        if (left.EnforceTextVideoModelExclusivity != right.EnforceTextVideoModelExclusivity)
+            bits.Add(left.EnforceTextVideoModelExclusivity ? "模型显存互斥：开" : "模型显存互斥：关");
+        if (!string.Equals(left.StartupModel, right.StartupModel, StringComparison.Ordinal))
+            bits.Add(left.StartupModel switch
+            {
+                StartupModelSelection.Video => "启动客户端时开启视频模型",
+                StartupModelSelection.None => "启动客户端时不开启模型",
+                _ => "启动客户端时开启文本模型",
+            });
+        if (!string.Equals(left.SelectedVideoProfileId, right.SelectedVideoProfileId, StringComparison.Ordinal))
+            bits.Add("视频模型档案");
         if (!string.Equals(
                 SessionSortModes.Normalize(left.SessionSortMode),
                 SessionSortModes.Normalize(right.SessionSortMode),
                 StringComparison.Ordinal))
             bits.Add($"列表{SessionSortModes.DisplayName(left.ResolveSessionSortMode())}");
+        if (left.VideoGeneration.Width != right.VideoGeneration.Width || left.VideoGeneration.Height != right.VideoGeneration.Height)
+            bits.Add($"视频分辨率 {left.VideoGeneration.Width}×{left.VideoGeneration.Height}");
+        if (left.VideoGeneration.DurationSeconds != right.VideoGeneration.DurationSeconds)
+            bits.Add($"视频时长 {left.VideoGeneration.DurationSeconds} 秒");
+        if (left.VideoGeneration.Steps != right.VideoGeneration.Steps)
+            bits.Add($"视频步数 {left.VideoGeneration.Steps}");
+        if (left.VideoGeneration.RandomSeed != right.VideoGeneration.RandomSeed || left.VideoGeneration.Seed != right.VideoGeneration.Seed)
+            bits.Add(left.VideoGeneration.RandomSeed ? "视频随机种子" : $"视频种子 {left.VideoGeneration.Seed}");
+        if (left.ChatAttachments != right.ChatAttachments)
+            bits.Add("聊天附件");
+        if (left.VideoPromptPhrases != right.VideoPromptPhrases)
+            bits.Add("视频模板套话");
         return bits;
     }
 
@@ -326,6 +538,8 @@ public sealed record LocalChatSettings
     public IReadOnlyList<string> DescribeRestartFieldChanges(LocalChatSettings previous)
     {
         var bits = new List<string>();
+        if (!string.Equals(SelectedTextProfileId, previous.SelectedTextProfileId, StringComparison.Ordinal))
+            bits.Add("文本模型档案");
         if (ContextSize != previous.ContextSize)
             bits.Add($"上下文 {ContextSize}");
         if (GpuLayers != previous.GpuLayers)
@@ -333,9 +547,9 @@ public sealed record LocalChatSettings
         if (ParallelSlots != previous.ParallelSlots)
             bits.Add($"并发槽 {ParallelSlots}");
         if (ReasoningEnabled != previous.ReasoningEnabled)
-            bits.Add(ReasoningEnabled ? "思考·开" : "思考·关");
+            bits.Add(ReasoningEnabled ? "思考：开" : "思考：关");
         if (UseJinja != previous.UseJinja)
-            bits.Add(UseJinja ? "Jinja·开" : "Jinja·关");
+            bits.Add(UseJinja ? "Jinja：开" : "Jinja：关");
         if (!string.Equals(ModelAlias, previous.ModelAlias, StringComparison.Ordinal))
             bits.Add("模型别名");
         if (!string.Equals(ModelPath, previous.ModelPath, StringComparison.OrdinalIgnoreCase))
@@ -399,6 +613,8 @@ public sealed record LocalChatSettings
         var minTimeout = MaxOutputTokens / 20 + 60;
         if (RequestTimeoutSeconds < minTimeout)
             errors.Add($"请求超时过短：最大输出 {MaxOutputTokens} 时建议至少 {minTimeout} 秒，否则长文可能中途超时");
+        errors.AddRange((VideoGeneration ?? VideoGenerationSettings.SafeDefaults).Validate());
+        errors.AddRange((ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults).Validate());
         return errors;
     }
 
@@ -453,7 +669,16 @@ public sealed class SettingsStore(string path)
                 ?? throw new JsonException("设置文件内容为空");
             var errors = settings.Validate();
             if (errors.Count > 0) throw new JsonException(string.Join("；", errors));
-            return new(settings, null, null);
+            return new(settings with
+            {
+                StartupModel = StartupModelSelection.Normalize(settings.StartupModel),
+                VideoGeneration = settings.VideoGeneration ?? VideoGenerationSettings.SafeDefaults,
+                VideoPromptPhrases = (settings.VideoPromptPhrases ?? VideoPromptTemplatePhrases.OfficialDefaults).WithDefaults(),
+                ChatAttachments = settings.ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults,
+                HanhuaPackRoot = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPackRoot, LocalChatSettings.DefaultHanhuaPackRoot),
+                HanhuaPythonExe = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPythonExe, LocalChatSettings.DefaultHanhuaPythonExe),
+                HanhuaMitRoot = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaMitRoot, LocalChatSettings.DefaultHanhuaMitRoot),
+            }, null, null);
         }
         catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)
         {

@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "change_scope": "将现有聊天客户端扩展为数据驱动的本地文本与视频模型客户端，同时保留已确认的聊天、退出、状态和视觉关系",
+  "baseline_paths": [
+    "docs/winui-ui-baseline.md",
+    "docs/winui-ui-baseline.json"
+  ],
+  "recovery": {
+    "strategy": "git-diff",
+    "location": "当前工作区的受限源码和配置差异；模型、输出、缓存与凭据不属于恢复对象",
+    "rollback": "按本账本的 affected_surfaces 逐项恢复对应源码和配置，不覆盖无关用户修改"
+  },
+  "affected_surfaces": [
+    {
+      "id": "shared-shell",
+      "intended_change": "加入聊天与视频模式以及当前模型启动入口",
+      "preserve": ["左侧品牌区", "右上三项紧凑状态字号和间距", "左对齐模式工具栏", "页面切换时纵向节奏稳定"],
+      "change_kinds": ["visual", "functional"]
+    },
+    {
+      "id": "chat-composer",
+      "intended_change": "复用统一输入行为并提供根层展开编辑；输入正文按内容与窗口高度在 3 至 8 行内自适应，超过上限后仅内部滚动",
+      "preserve": ["发送按钮位于正文行最右并垂直居中", "输入字体和内边距", "快捷键与历史", "生成期间输入仍可编辑", "聊天和视频的标题、摘要、正文、快捷提示使用同一排版层级"],
+      "change_kinds": ["visual", "functional", "temporal"]
+    },
+    {
+      "id": "video-composer",
+      "intended_change": "提供与聊天一致的输入、展开和提交结构，并增加默认折叠的本次生成参数；本次参数只覆盖当前请求，不写回全局设置；输入正文与聊天共用有界自适应高度和字体层级；折叠入口改为输入卡内的轻量透明参数行，去掉默认 Expander 的整块灰色标题面和双重边框，详细字段仍在原位向下展开",
+      "preserve": ["模型名只在顶部显示", "折叠时输入卡仅显示分辨率和时长", "主按钮位置与聊天一致", "视频状态不进入聊天区", "全局视频设置仍作为新任务初始值", "参数展开时输入区不会无限挤压视频预览", "参数展开不移动底部命令栏或改变页面模式工具栏", "常规 960×740 窗口展开本次参数后底部命令栏仍完整可见", "详细字段继续使用圆角内容面且可通过键盘访问"],
+      "change_kinds": ["visual", "functional"]
+    },
+    {
+      "id": "video-preview",
+      "intended_change": "按视频窗口恢复已绑定成片并按媒体比例显示；新建/清空窗口保持空白，不抢输出目录最新文件",
+      "preserve": ["圆角预览面", "控件默认隐藏", "悬浮或键盘焦点才显示控件", "不为布局测试重新生成视频"],
+      "change_kinds": ["visual", "temporal"]
+    },
+    {
+      "id": "settings-drawer",
+      "intended_change": "选择并导入文本或视频模型档案以及默认启动策略；每次打开或切换设置分区时回到内容顶部，视频分区直接展示可编辑的档案参数入口",
+      "preserve": ["文本和视频设置同构", "右侧抽屉宽度", "数字框不横向拉伸", "模型启动按钮位于主页面", "设置内容在抽屉内滚动而不改变主页面布局"],
+      "change_kinds": ["visual", "functional", "temporal"]
+    },
+    {
+      "id": "exit-overlay",
+      "intended_change": "提供仅退出、退出并关闭模型服务、取消三项",
+      "preserve": ["点 X 后立即显示首帧", "仅退出不停止服务", "取消返回应用", "不用已知崩溃路径 ContentDialog"],
+      "change_kinds": ["visual", "functional", "temporal", "runtime"]
+    },
+    {
+      "id": "model-profiles",
+      "intended_change": "从本地档案读取模型名称、路径、端口与工作流映射，并让视频档案的帧率、帧对齐、媒体上限和工作流采样参数在视频设置分区中可发现、可编辑、可保存；默认按本机安全上限，设置控件可调到工作流最大值",
+      "preserve": ["界面不写死当前部署模型名", "目录选择器真实弹出", "选择结果持久化", "生命周期状态来自运行时", "工作流与节点映射不在普通参数编辑中被隐式改写"],
+      "change_kinds": ["functional", "runtime"]
+    },
+    {
+      "id": "video-workflow",
+      "intended_change": "将视频设置完整映射到选定 ComfyUI 工作流",
+      "preserve": ["已成功 H3 图的节点映射", "SaveVideo format 和 codec 必填输入", "错误正文完整可复制", "文件位置选中实际输出文件"],
+      "change_kinds": ["functional", "runtime", "packaged"]
+    }
+  ],
+  "paired_surfaces": [
+    {
+      "left": "chat-composer",
+      "right": "video-composer",
+      "shared_relations": ["三行信息架构", "展开按钮位置", "主按钮对齐", "Enter 与 Shift+Enter 行为"],
+      "state_owners": ["聊天会话、回复和错误只属于聊天页", "视频任务、进度和错误只属于视频页"]
+    },
+    {
+      "left": "text-settings",
+      "right": "video-settings",
+      "shared_relations": ["模型档案选择", "选择本地目录", "重置与保存位置", "字段宽度和说明层级"],
+      "state_owners": ["文本运行时状态属于文本模型", "视频运行时状态属于视频模型"]
+    }
+  ],
+  "runtime_contracts": [
+    {
+      "integration": "ComfyUI SaveVideo",
+      "authoritative_source": "目标 ComfyUI 的本地节点 schema 与已经成功的 H3 API 工作流",
+      "required_inputs": ["video", "fps", "filename_prefix", "format", "codec"],
+      "verification": "提交前比较节点映射，并由核心回归断言 format=mp4 与 codec=auto；真实生成验收另行执行"
+    },
+    {
+      "integration": "文本与视频模型生命周期",
+      "authoritative_source": "本地服务管理器的端口、进程身份和健康端点",
+      "required_inputs": ["selected profile", "runtime path", "port", "start arguments"],
+      "verification": "分别验证冷启动、启动失败、已启动、释放和退出两分支，不以固定文案代替状态"
+    }
+  ],
+  "acceptance": [
+    {"claim": "基准中声明的 XAML 关系与运行时映射仍存在", "kind": "static", "procedure": "运行 tests/verify-winui-ui-baseline.ps1 和核心合约测试"},
+    {"claim": "本次参数覆盖当前请求且不改写全局默认；视频档案参数可验证、保存并重载", "kind": "functional", "procedure": "运行 QwenLocalChat.Tests 中本次参数与视频档案编辑回归，再运行完整套件"},
+    {"claim": "输入、设置、模型档案、输出定位和退出逻辑可用", "kind": "functional", "procedure": "运行 QwenLocalChat.Tests 完整套件"},
+    {"claim": "聊天和视频在相同窗口尺寸下对齐且无裁切", "kind": "real-window", "procedure": "在已注册 AppX 中逐页检查默认、展开和错误状态"},
+    {"claim": "关闭首帧、长回复锚点、悬浮控件、缩放与选择器按时序工作", "kind": "temporal", "procedure": "真实窗口交互或 UIA 记录时间过程"},
+    {"claim": "目标本地模型服务接收完整契约并报告真实生命周期", "kind": "runtime", "procedure": "在授权后执行受控服务启动与最小请求；视频布局测试只使用现有媒体"},
+    {"claim": "用户启动的 AppX 与本次构建一致", "kind": "artifact-identity", "procedure": "部署脚本核对构建 DLL、AppX DLL SHA-256 与 AUMID"}
+  ],
+  "baseline_update": {
+    "changed": true,
+    "approval_reference": "2026-08-12 用户明确要求按后续设计优化，并允许档案参数设置可编辑"
+  }
+}

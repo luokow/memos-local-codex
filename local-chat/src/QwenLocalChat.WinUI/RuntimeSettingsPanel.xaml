@@ -4,17 +4,6 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <UserControl.Resources>
-        <Style x:Key="CompactSettingsNumberBoxStyle" TargetType="NumberBox">
-            <Setter Property="Width" Value="136" />
-            <Setter Property="HorizontalAlignment" Value="Left" />
-        </Style>
-        <Style x:Key="CompactSettingsTextBoxStyle" TargetType="TextBox">
-            <Setter Property="Width" Value="360" />
-            <Setter Property="HorizontalAlignment" Value="Left" />
-        </Style>
-    </UserControl.Resources>
-
     <Grid x:Name="SettingsRoot">
         <!-- Dimmed scrim behind the drawer -->
         <Rectangle x:Name="Scrim" Fill="#CC000000" Opacity="0" IsHitTestVisible="False" />
@@ -60,7 +49,13 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="模型设置" Style="{StaticResource SettingsPageTitleStyle}" VerticalAlignment="Center" />
+                        <StackPanel Spacing="6" VerticalAlignment="Center">
+                            <TextBlock Text="模型设置" Style="{StaticResource SettingsPageTitleStyle}" />
+                            <SelectorBar x:Name="SettingsSectionSelector" AutomationProperties.AutomationId="SettingsSectionSelector" SelectionChanged="SettingsSectionSelector_SelectionChanged">
+                                <SelectorBarItem x:Name="TextSettingsSectionItem" Text="文本模型" />
+                                <SelectorBarItem x:Name="VideoSettingsSectionItem" Text="视频模型" />
+                            </SelectorBar>
+                        </StackPanel>
                         <Button Grid.Column="1" AutomationProperties.AutomationId="CloseSettingsButton" AutomationProperties.Name="关闭设置" Content="关闭" Click="CloseButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="关闭面板；若有未保存修改会先确认" VerticalAlignment="Top" />
                     </Grid>
                     <!-- Short glossary only; each section card already says when it takes effect. -->
@@ -90,14 +85,61 @@
                     </Border>
                 </StackPanel>
 
-                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <ScrollViewer x:Name="SettingsContentScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <StackPanel Padding="0,2,6,8" Spacing="12">
+                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="启动与驻留" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="选择客户端打开后自动启动的当前模型；默认启动文本模型。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <ComboBox x:Name="StartupModelBox" AutomationProperties.AutomationId="StartupModelSetting" AutomationProperties.Name="打开应用后启动的模型" Header="打开应用后启动">
+                                    <ComboBoxItem Content="文本模型" Tag="text" />
+                                    <ComboBoxItem Content="视频模型" Tag="video" />
+                                    <ComboBoxItem Content="不自动启动" Tag="none" />
+                                </ComboBox>
+                                <ToggleSwitch
+                                    x:Name="ModelExclusivityToggle"
+                                    AutomationProperties.AutomationId="ModelExclusivitySetting"
+                                    AutomationProperties.Name="聊天、视频与汉化显存互斥"
+                                    Header="聊天、视频与汉化显存互斥"
+                                    OnContent="开启"
+                                    OffContent="关闭" />
+                            </StackPanel>
+                        </Border>
+                        <StackPanel x:Name="TextSettingsSection" Spacing="12">
+                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="当前文本模型" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="选择已配置的本地模型档案；名称、API model 和启动参数均来自档案。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <ComboBox
+                                    x:Name="TextModelProfileBox"
+                                    AutomationProperties.AutomationId="TextModelProfileSetting"
+                                    AutomationProperties.Name="当前文本模型"
+                                    Header="模型档案"
+                                    HorizontalAlignment="Stretch"
+                                    DisplayMemberPath="DisplayName"
+                                    SelectionChanged="TextModelProfileBox_SelectionChanged" />
+                                <TextBlock Text="首次发送时会按需启动；也可先启动检查服务。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="TextModelProfileDetails" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="TextModelOperationStatus" AutomationProperties.AutomationId="TextModelOperationStatus" Style="{StaticResource SettingsSectionHintStyle}" />
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Button x:Name="TextImportButton" AutomationProperties.AutomationId="TextImportButton" AutomationProperties.Name="选择本地文本模型目录" Content="选择本地目录" Click="TextImportButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                    <Button x:Name="ReleaseTextModelButton" Grid.Column="1" AutomationProperties.AutomationId="ReleaseTextModelButton" AutomationProperties.Name="释放文本模型" Content="释放模型" Click="ReleaseTextModelButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                         <!-- Each settings group is a bordered card so section boundaries read at a glance. -->
                         <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
                             <StackPanel Spacing="8">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="生成" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="即时生效 · 下一句对话" Style="{StaticResource SettingsSectionHintStyle}" />
+                                    <TextBlock Text="即时生效，下一句对话使用" Style="{StaticResource SettingsSectionHintStyle}" />
                                 </StackPanel>
                                 <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
                                 <Grid ColumnSpacing="12" RowSpacing="10">
@@ -132,7 +174,7 @@
                             <StackPanel Spacing="8">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="会话" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="即时生效 · 无需重启模型" Style="{StaticResource SettingsSectionHintStyle}" />
+                                    <TextBlock Text="即时生效，无需重启模型" Style="{StaticResource SettingsSectionHintStyle}" />
                                 </StackPanel>
                                 <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
                                 <ComboBox
@@ -213,8 +255,194 @@
                                     </Border>
                                     <ToggleSwitch x:Name="AutoStartOnDemandToggle" AutomationProperties.AutomationId="AutoStartOnDemandSetting" Grid.Row="1" Grid.ColumnSpan="2" Header="记忆调用按需启动模型" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="MemOS 的 recall 和 remember 在服务停止时可启动共享模型；健康检查和列表查询不会启动" />
                                 </Grid>
+                                <StackPanel Spacing="2" Margin="0,8,0,0">
+                                    <TextBlock Text="汉化路径" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
+                                    <TextBlock Text="即时。默认已填本机路径，可改。汉化页调度现有 Python 脚本。密钥仍在原配置里，不要填到这里。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <TextBox x:Name="HanhuaPackRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPackRootSetting" Header="汉化工具包根目录" TextWrapping="Wrap" />
+                                <TextBox x:Name="HanhuaPythonExeBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPythonExeSetting" Header="Python 可执行文件" TextWrapping="Wrap" />
+                                <TextBox x:Name="HanhuaMitRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaMitRootSetting" Header="manga-image-translator 根目录" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
+
+                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="聊天附件" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock Text="即时。默认最多 4 个文件、单文件 256 KB，可调到 9 个、16 MB。当前 Qwen 文本模型只会读文本和 PDF 抽出的文字。打开图片/音频/视频只是放开选择器，方便以后换多模态档案。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <Grid ColumnSpacing="12" RowSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <ToggleSwitch x:Name="ChatAttachTextToggle" AutomationProperties.AutomationId="ChatAttachTextSetting" Header="文本" OnContent="允许" OffContent="关闭" />
+                                    <ToggleSwitch x:Name="ChatAttachImageToggle" Grid.Column="1" AutomationProperties.AutomationId="ChatAttachImageSetting" Header="图片" OnContent="允许" OffContent="关闭" />
+                                    <ToggleSwitch x:Name="ChatAttachAudioToggle" Grid.Row="1" AutomationProperties.AutomationId="ChatAttachAudioSetting" Header="音频" OnContent="允许" OffContent="关闭" />
+                                    <ToggleSwitch x:Name="ChatAttachVideoToggle" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="ChatAttachVideoSetting" Header="视频" OnContent="允许" OffContent="关闭" />
+                                    <NumberBox x:Name="ChatAttachMaxFilesBox" Grid.Row="2" AutomationProperties.AutomationId="ChatAttachMaxFilesSetting" Header="最多文件数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="9" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <NumberBox x:Name="ChatAttachMaxKbBox" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="ChatAttachMaxKbSetting" Header="单文件上限（KB）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="4" Maximum="16384" SmallChange="64" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                </Grid>
+                                <TextBox x:Name="ChatAttachExtraExtensionsBox" AutomationProperties.AutomationId="ChatAttachExtraExtensionsSetting" Header="额外文本扩展名" PlaceholderText=".rst, .tex" Style="{StaticResource CompactSettingsTextBoxStyle}" />
+                            </StackPanel>
+                        </Border>
+
+                        </StackPanel>
+                        <StackPanel x:Name="VideoSettingsSection" Visibility="Collapsed" Spacing="12">
+                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                                <StackPanel Spacing="8">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="当前视频模型" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                        <TextBlock Text="选择已配置的 ComfyUI 工作流档案；节点映射和能力范围随模型切换。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                    <ComboBox
+                                        x:Name="VideoModelProfileBox"
+                                        AutomationProperties.AutomationId="VideoModelProfileSetting"
+                                        AutomationProperties.Name="当前视频模型"
+                                        Header="模型档案"
+                                        HorizontalAlignment="Stretch"
+                                        DisplayMemberPath="DisplayName"
+                                        SelectionChanged="VideoModelProfileBox_SelectionChanged" />
+                                    <TextBlock Text="首次开始生成时会按需启动；也可先启动检查服务。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="VideoModelProfileDetails" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="VideoModelOperationStatus" AutomationProperties.AutomationId="VideoModelOperationStatus" Style="{StaticResource SettingsSectionHintStyle}" />
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <Button x:Name="VideoImportButton" AutomationProperties.AutomationId="VideoImportButton" AutomationProperties.Name="选择本地视频模型目录" Content="选择本地目录" Click="VideoImportButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                        <Button x:Name="ReleaseVideoModelButton" Grid.Column="1" AutomationProperties.AutomationId="ReleaseVideoModelButton" AutomationProperties.Name="释放视频模型" Content="释放模型" Click="ReleaseVideoModelButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,8">
+                                <Expander x:Name="VideoProfileParametersExpander" AutomationProperties.AutomationId="VideoProfileParametersExpander" Header="模型档案参数（能力范围与工作流）" ExpandDirection="Down" HorizontalContentAlignment="Stretch" VerticalAlignment="Top">
+                                    <StackPanel Spacing="8" Margin="0,8,0,4">
+                                        <TextBlock Text="默认按档案推荐值填写；数字框可调到当前工作流允许的最大值。保存后提交时覆盖对应节点，不会改写磁盘上的工作流文件。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                        <TextBox x:Name="VideoProfileDisplayNameBox" AutomationProperties.AutomationId="VideoProfileDisplayNameSetting" Header="显示名称" Style="{StaticResource CompactSettingsTextBoxStyle}" />
+                                        <Grid ColumnSpacing="12" RowSpacing="10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <NumberBox x:Name="VideoProfileFpsBox" AutomationProperties.AutomationId="VideoProfileFpsSetting" Header="帧率" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="240" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileAlignmentMultipleBox" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileAlignmentMultipleSetting" Header="帧对齐倍数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="10000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileAlignmentOffsetBox" Grid.Row="1" AutomationProperties.AutomationId="VideoProfileAlignmentOffsetSetting" Header="帧对齐偏移" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="9999" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileDimensionStepBox" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileDimensionStepSetting" Header="尺寸步进" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileMinimumDimensionBox" Grid.Row="2" AutomationProperties.AutomationId="VideoProfileMinimumDimensionSetting" Header="最小边长" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="64" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileMaximumDimensionBox" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileMaximumDimensionSetting" Header="最大边长" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="64" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileMaximumPixelsBox" Grid.Row="3" Grid.ColumnSpan="2" AutomationProperties.AutomationId="VideoProfileMaximumPixelsSetting" Header="最大像素数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="2147483647" SmallChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileMinimumDurationBox" Grid.Row="4" AutomationProperties.AutomationId="VideoProfileMinimumDurationSetting" Header="最短时长（秒）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="300" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileMaximumDurationBox" Grid.Row="4" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileMaximumDurationSetting" Header="最长时长（秒）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="300" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileMinimumStepsBox" Grid.Row="5" AutomationProperties.AutomationId="VideoProfileMinimumStepsSetting" Header="最少步数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="1000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileMaximumStepsBox" Grid.Row="5" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileMaximumStepsSetting" Header="最多步数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="1000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                        </Grid>
+                                        <TextBlock Text="媒体上限" Style="{StaticResource SettingsSectionTitleStyle}" Margin="0,8,0,0" />
+                                        <TextBlock Text="默认参考图 4 张、视频/音频各 1，可调到 9 / 3 / 3。参考模式可同时使用图、视频和音频。某一类调到 0 只隐藏那一类芯片。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                        <Grid ColumnSpacing="12" RowSpacing="10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <NumberBox x:Name="VideoProfileMaxReferenceImagesBox" AutomationProperties.AutomationId="VideoProfileMaxReferenceImagesSetting" Header="最大参考图张数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="9" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <ComboBox x:Name="VideoProfileRefImageSizeBox" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileRefImageSizeSetting" Header="参考图尺寸" HorizontalAlignment="Stretch">
+                                                <ComboBoxItem Content="匹配生成分辨率" Tag="match" />
+                                                <ComboBoxItem Content="最大短边（更吃显存）" Tag="max" />
+                                            </ComboBox>
+                                            <NumberBox x:Name="VideoProfileMaxReferenceVideosBox" Grid.Row="1" AutomationProperties.AutomationId="VideoProfileMaxReferenceVideosSetting" Header="最大参考视频数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="3" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileMaxReferenceAudiosBox" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileMaxReferenceAudiosSetting" Header="最大参考音频数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="3" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <ToggleSwitch x:Name="VideoProfileTextToVideoToggle" Grid.Row="2" AutomationProperties.AutomationId="VideoProfileTextToVideoSetting" Header="文生视频" OnContent="开启" OffContent="关闭" />
+                                            <ToggleSwitch x:Name="VideoProfileFirstFrameToggle" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileFirstFrameSetting" Header="首帧图生视频" OnContent="开启" OffContent="关闭" />
+                                            <ToggleSwitch x:Name="VideoProfileFirstLastFrameToggle" Grid.Row="3" AutomationProperties.AutomationId="VideoProfileFirstLastFrameSetting" Header="首帧 + 尾帧 / 尾帧" OnContent="开启" OffContent="关闭" />
+                                            <ComboBox x:Name="VideoProfileDefaultModeBox" Grid.Row="3" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileDefaultModeSetting" Header="默认模式" HorizontalAlignment="Stretch">
+                                                <ComboBoxItem Content="文生视频" Tag="text" />
+                                                <ComboBoxItem Content="首帧图生视频" Tag="first_frame" />
+                                                <ComboBoxItem Content="首帧 + 尾帧" Tag="first_last_frame" />
+                                                <ComboBoxItem Content="尾帧图生视频" Tag="last_frame" />
+                                                <ComboBoxItem Content="参考图" Tag="single_reference_image" />
+                                                <ComboBoxItem Content="参考视频" Tag="reference_video" />
+                                                <ComboBoxItem Content="参考音频" Tag="reference_audio" />
+                                            </ComboBox>
+                                        </Grid>
+                                        <TextBlock Text="工作流参数" Style="{StaticResource SettingsSectionTitleStyle}" Margin="0,8,0,0" />
+                                        <TextBlock Text="这些值以前写死在工作流模板里。改完后下次提交会写到对应节点。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                        <Grid ColumnSpacing="12" RowSpacing="10">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <NumberBox x:Name="VideoProfileCfgBox" AutomationProperties.AutomationId="VideoProfileCfgSetting" Header="CFG" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="100" SmallChange="0.1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileDenoiseBox" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileDenoiseSetting" Header="去噪" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="1" SmallChange="0.05" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <ComboBox x:Name="VideoProfileSamplerBox" Grid.Row="1" AutomationProperties.AutomationId="VideoProfileSamplerSetting" Header="采样器" HorizontalAlignment="Stretch">
+                                                <ComboBoxItem Content="euler" Tag="euler" />
+                                                <ComboBoxItem Content="euler_ancestral" Tag="euler_ancestral" />
+                                                <ComboBoxItem Content="dpmpp_2m" Tag="dpmpp_2m" />
+                                                <ComboBoxItem Content="dpmpp_2m_sde" Tag="dpmpp_2m_sde" />
+                                                <ComboBoxItem Content="dpmpp_sde" Tag="dpmpp_sde" />
+                                                <ComboBoxItem Content="uni_pc" Tag="uni_pc" />
+                                                <ComboBoxItem Content="ddim" Tag="ddim" />
+                                                <ComboBoxItem Content="lcm" Tag="lcm" />
+                                            </ComboBox>
+                                            <ComboBox x:Name="VideoProfileSchedulerBox" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileSchedulerSetting" Header="调度器" HorizontalAlignment="Stretch">
+                                                <ComboBoxItem Content="simple" Tag="simple" />
+                                                <ComboBoxItem Content="normal" Tag="normal" />
+                                                <ComboBoxItem Content="karras" Tag="karras" />
+                                                <ComboBoxItem Content="exponential" Tag="exponential" />
+                                                <ComboBoxItem Content="sgm_uniform" Tag="sgm_uniform" />
+                                                <ComboBoxItem Content="ddim_uniform" Tag="ddim_uniform" />
+                                                <ComboBoxItem Content="beta" Tag="beta" />
+                                            </ComboBox>
+                                            <NumberBox x:Name="VideoProfileShiftVideoBox" Grid.Row="2" AutomationProperties.AutomationId="VideoProfileShiftVideoSetting" Header="视频 shift" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0.01" Maximum="100" SmallChange="0.5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <NumberBox x:Name="VideoProfileShiftAudioBox" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileShiftAudioSetting" Header="音频 shift" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0.01" Maximum="100" SmallChange="0.5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                            <TextBox x:Name="VideoProfileNegativePromptBox" Grid.Row="3" Grid.ColumnSpan="2" AutomationProperties.AutomationId="VideoProfileNegativePromptSetting" Header="负面提示词" Style="{StaticResource CompactSettingsTextBoxStyle}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Expander>
+                            </Border>
+                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,8">
+                                <Expander x:Name="VideoPromptPhrasesExpander" AutomationProperties.AutomationId="VideoPromptPhrasesExpander" Header="提示词模板" ExpandDirection="Down" HorizontalContentAlignment="Stretch" VerticalAlignment="Top">
+                                    <StackPanel Spacing="8" Margin="0,8,0,4">
+                                        <TextBlock Text="生成页四个格子的名字。日常改提示词请在视频页填四格，或点「查看正文」。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                        <StackPanel x:Name="VideoPromptPrefixHost" Spacing="8" />
+                                        <Expander Header="高级套话（一般不用改）" ExpandDirection="Down" HorizontalContentAlignment="Stretch">
+                                            <StackPanel Spacing="8" Margin="0,8,0,0">
+                                                <TextBlock Text="插入模板时的官方骨架句子。占位符：{id} {pic} {vid} {clauses}。留空则用默认。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                                <StackPanel x:Name="VideoPromptPhraseHost" Spacing="8" />
+                                            </StackPanel>
+                                        </Expander>
+                                        <Button x:Name="ResetVideoPromptPhrasesButton" AutomationProperties.AutomationId="ResetVideoPromptPhrasesButton" AutomationProperties.Name="恢复模板套话为官方默认" Content="恢复官方套话" HorizontalAlignment="Right" Click="ResetVideoPromptPhrasesButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                    </StackPanel>
+                                </Expander>
+                            </Border>
+                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                            <StackPanel Spacing="8">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="生成默认值" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                    <TextBlock x:Name="VideoCapabilityHint" Text="保存后用于下一次视频生成；具体范围由当前模型档案决定。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Grid ColumnSpacing="12" RowSpacing="10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <NumberBox x:Name="VideoWidthBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoWidthSetting" Header="宽度" Minimum="256" Maximum="1024" SmallChange="32" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <NumberBox x:Name="VideoHeightBox" Grid.Column="1" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoHeightSetting" Header="高度" Minimum="256" Maximum="1024" SmallChange="32" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <NumberBox x:Name="VideoDurationBox" Grid.Row="1" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoDurationSetting" Header="时长（秒）" Minimum="5" Maximum="15" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <NumberBox x:Name="VideoStepsBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoStepsSetting" Header="步数" Minimum="10" Maximum="30" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <NumberBox x:Name="VideoSeedBox" Grid.Row="2" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoSeedSetting" Header="固定种子" Minimum="0" Maximum="2147483647" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                                        <ToggleSwitch x:Name="VideoRandomSeedToggle" AutomationProperties.AutomationId="VideoRandomSeedSetting" Header="随机种子" OnContent="开启" OffContent="关闭" />
+                                        <TextBlock Text="尺寸、时长、步数和帧率限制由当前模型档案提供。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ComboBox x:Name="VideoOutputFormatBox" Grid.Row="3" AutomationProperties.AutomationId="VideoOutputFormatSetting" Header="输出格式" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="MP4" Tag="mp4" />
+                                        <ComboBoxItem Content="自动" Tag="auto" />
+                                    </ComboBox>
+                                    <ComboBox x:Name="VideoCodecBox" Grid.Row="3" Grid.Column="1" AutomationProperties.AutomationId="VideoCodecSetting" Header="视频编码" HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="自动" Tag="auto" />
+                                        <ComboBoxItem Content="H.264" Tag="h264" />
+                                    </ComboBox>
+                                </Grid>
+                            </StackPanel>
+                            </Border>
+                        </StackPanel>
 
                         <InfoBar x:Name="ValidationInfo" AutomationProperties.AutomationId="SettingsValidationInfo" IsOpen="False" IsClosable="False" Severity="Error" />
                     </StackPanel>

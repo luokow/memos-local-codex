@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Aumid = '7D1F07DC-0090-4570-868B-B0D5D40CFB40_1z32rh13vfry6!App',
-    [string]$ShortcutName = 'Qwen Local'
+    [string]$ShortcutName = 'Local AI'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,7 +30,7 @@ $shortcut.TargetPath = $explorerPath
 $shortcut.Arguments = "shell:AppsFolder\$Aumid"
 $shortcut.WorkingDirectory = $root
 $shortcut.IconLocation = "$iconPath,0"
-$shortcut.Description = 'Open the local Qwen chat window'
+$shortcut.Description = 'Open the local chat and video AI client'
 $shortcut.Save()
 
 $check = $shell.CreateShortcut($shortcutPath)
