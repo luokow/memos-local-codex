@@ -53,7 +53,7 @@ public static class HanhuaProgressStatus
 
     public static string ComposerHint(HanhuaKind kind)
         => kind == HanhuaKind.Image
-            ? "自动三步：抽字 → 填字 → 嵌字。不用点右上角启动。"
+            ? "自动三步：抽字 → 填字 → 嵌字。完成后可点补翻译，只补未译句子和缺页。"
             : "自动四步：复制 → 抽字 → 翻译 → 回写。本机 Qwen 会自动启动。";
 
     public static HanhuaLiveProgress FromJob(HanhuaJob job, TimeSpan elapsed)

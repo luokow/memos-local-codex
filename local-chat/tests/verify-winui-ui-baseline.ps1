@@ -514,6 +514,9 @@ if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:ComboBox[@x:Name='EngineBox'
 if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='ComposerStartButton']", $hanhuaNs)) {
     throw 'Hanhua composer must keep the single start button next to the folder picker.'
 }
+if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='CatchUpHanhuaButton']", $hanhuaNs)) {
+    throw 'Hanhua footer must expose a one-click catch-up button for untranslated image pages.'
+}
 if ($null -ne $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='StartHanhuaButton']", $hanhuaNs)) {
     throw 'Hanhua footer must not repeat the start button already on the composer.'
 }

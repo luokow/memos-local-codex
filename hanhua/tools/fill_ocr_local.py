@@ -78,6 +78,10 @@ def translate_mapping(
 ) -> dict[str, str]:
     originals = [key for key in data if key not in SKIP]
     keys = pending_keys(data, originals)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    (dest.parent / "filled_keys.json").write_text(
+        json.dumps(keys, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     if translate_fn is None:
         if engine == "local":
             ok, detail = local_qwen.probe()

@@ -83,6 +83,18 @@ public sealed partial class HanhuaPanel : UserControl
             AppendLog(interrupted.Message ?? "上次汉化未完成。");
             SetIdleStatus(interrupted.Message ?? "上次汉化未完成。");
         }
+        else
+        {
+            var catchUp = HanhuaCatchUp.Latest(_store.Load().Jobs);
+            if (catchUp is not null)
+            {
+                _job = catchUp;
+                SourcePathBox.Text = catchUp.SourcePath;
+                SelectTagged(KindBox, "image");
+                OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(catchUp.OutputPath);
+                SetIdleStatus("上次图片汉化可点补翻译，只补未译句子和缺页。");
+            }
+        }
         UpdateButtons();
     }
 
@@ -124,6 +136,12 @@ public sealed partial class HanhuaPanel : UserControl
         await StartAsync();
     }
 
+    private async void CatchUpButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsBusy) return;
+        await StartAsync(catchUp: true);
+    }
+
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
         => SettingsRequested?.Invoke(this, EventArgs.Empty);
 
@@ -135,7 +153,10 @@ public sealed partial class HanhuaPanel : UserControl
             var bat = Path.Combine(output, "点我打开中文版.bat");
             var exe = Path.Combine(output, "Game.exe");
             var lastPng = Directory.Exists(output)
-                ? Directory.GetFiles(output, "*.png").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault()
+                ? Directory.GetFiles(output)
+                    .Where(path => HanhuaCatchUp.ImageSuffixes.Contains(Path.GetExtension(path)))
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
+                    .FirstOrDefault()
                 : null;
             var reveal = File.Exists(bat) ? bat
                 : File.Exists(exe) ? exe
@@ -158,7 +179,21 @@ public sealed partial class HanhuaPanel : UserControl
         SetIdleStatus("详情已复制，完整日志也在上方。");
     }
 
-    private async Task StartAsync()
+    private HanhuaJob? CatchUpTarget()
+    {
+        var source = SourcePathBox.Text.Trim();
+        if (HanhuaCatchUp.CanCatchUp(_job)
+            && (string.IsNullOrWhiteSpace(source)
+                || string.Equals(_job!.SourcePath, source, StringComparison.OrdinalIgnoreCase)))
+            return _job;
+        if (_store is null || string.IsNullOrWhiteSpace(source))
+            return null;
+        return HanhuaCatchUp.Latest(
+            _store.Load().Jobs.Where(job =>
+                string.Equals(job.SourcePath, source, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private async Task StartAsync(bool catchUp = false)
     {
         if (_settings is null || _store is null || _prepareGpu is null) return;
         var settings = _settings();
@@ -167,28 +202,54 @@ public sealed partial class HanhuaPanel : UserControl
         var source = SourcePathBox.Text.Trim();
         var blocked = HanhuaArbitration.RefuseHanhua(IsBusy, _chatBusy?.Invoke() == true, _videoBusy?.Invoke() == true);
         if (blocked is not null) { SetIdleStatus(blocked); return; }
-        if (string.IsNullOrWhiteSpace(source) || !Directory.Exists(source))
+        HanhuaJob job;
+        if (catchUp)
         {
-            SetIdleStatus("请先选择有效的源目录。");
-            return;
+            var target = CatchUpTarget();
+            if (target is null)
+            {
+                SetIdleStatus("没有可补的图片任务。请先完成一次图片汉化。");
+                return;
+            }
+            source = target.SourcePath;
+            kind = target.Kind;
+            engine = target.Engine;
+            if (string.IsNullOrWhiteSpace(source) || !Directory.Exists(source))
+            {
+                SetIdleStatus("源目录不在了，无法补翻译。");
+                return;
+            }
+            var missingCatchUp = HanhuaCommand.Validate(settings, kind);
+            if (missingCatchUp is not null) { SetIdleStatus(missingCatchUp); return; }
+            SourcePathBox.Text = source;
+            SelectTagged(KindBox, "image");
+            job = HanhuaCatchUp.Begin(target);
         }
-        var missing = HanhuaCommand.Validate(settings, kind);
-        if (missing is not null) { SetIdleStatus(missing); return; }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(source) || !Directory.Exists(source))
+            {
+                SetIdleStatus("请先选择有效的源目录。");
+                return;
+            }
+            var missing = HanhuaCommand.Validate(settings, kind);
+            if (missing is not null) { SetIdleStatus(missing); return; }
 
-        var resume = _job is { CanResume: true }
-            && string.Equals(_job.SourcePath, source, StringComparison.OrdinalIgnoreCase)
-            && _job.Kind == kind;
-        var job = resume
-            ? _job! with { Status = HanhuaJobStatus.Running, Engine = _job.Engine, Error = null, UpdatedUtc = DateTimeOffset.UtcNow }
-            : new HanhuaJob(
-                Guid.NewGuid().ToString("N")[..12],
-                kind,
-                engine,
-                kind == HanhuaKind.Game ? HanhuaPhase.Copy : HanhuaPhase.Ocr,
-                HanhuaJobStatus.Running,
-                source,
-                kind == HanhuaKind.Image ? HanhuaCommand.ImageWorkPath(settings.HanhuaPackRoot, Guid.NewGuid().ToString("N")[..12]) : null,
-                null, 0, 0, "开始汉化", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            var resume = _job is { CanResume: true }
+                && string.Equals(_job.SourcePath, source, StringComparison.OrdinalIgnoreCase)
+                && _job.Kind == kind;
+            job = resume
+                ? _job! with { Status = HanhuaJobStatus.Running, Engine = _job.Engine, Error = null, UpdatedUtc = DateTimeOffset.UtcNow }
+                : new HanhuaJob(
+                    Guid.NewGuid().ToString("N")[..12],
+                    kind,
+                    engine,
+                    kind == HanhuaKind.Game ? HanhuaPhase.Copy : HanhuaPhase.Ocr,
+                    HanhuaJobStatus.Running,
+                    source,
+                    kind == HanhuaKind.Image ? HanhuaCommand.ImageWorkPath(settings.HanhuaPackRoot, Guid.NewGuid().ToString("N")[..12]) : null,
+                    null, 0, 0, "开始汉化", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        }
         _job = job;
         _store.Upsert(job);
         _runCts = new CancellationTokenSource();
@@ -196,7 +257,7 @@ public sealed partial class HanhuaPanel : UserControl
         DispatcherQueue.TryEnqueue(() => _log.Clear());
         HanhuaEmptyState.Visibility = Visibility.Collapsed;
         ResultPreview.Visibility = Visibility.Collapsed;
-        AppendLog(HanhuaProgressStatus.StartBanner(kind));
+        AppendLog(catchUp ? "补翻译：只填未译句子，缺页才抽字，改动页才嵌字。" : HanhuaProgressStatus.StartBanner(kind));
         StartElapsedTicker();
         ApplyProgressUi();
         UpdateButtons();
@@ -204,6 +265,8 @@ public sealed partial class HanhuaPanel : UserControl
         {
             if (kind == HanhuaKind.Game)
                 await RunLaunchAsync(HanhuaCommand.Game(settings, job.Engine, source), job.Engine, HanhuaPhase.Translate, _runCts.Token);
+            else if (catchUp)
+                await RunImageCatchUpAsync(settings, job, _runCts.Token);
             else
                 await RunImageAsync(settings, job, _runCts.Token);
             if (_job.Status == HanhuaJobStatus.Cancelling)
@@ -211,7 +274,7 @@ public sealed partial class HanhuaPanel : UserControl
                 Finish(HanhuaJobStatus.Interrupted, _job.Phase, "已取消。已完成的部分还在，点开始汉化可从当前步继续。");
                 return;
             }
-            Finish(HanhuaJobStatus.Succeeded, _job.Phase, "汉化完成。");
+            Finish(HanhuaJobStatus.Succeeded, _job.Phase, catchUp ? "补翻译完成。" : "汉化完成。");
             await ShowPreviewAsync(_job.OutputPath);
         }
         catch (OperationCanceledException)
@@ -248,6 +311,28 @@ public sealed partial class HanhuaPanel : UserControl
         {
             cancellationToken.ThrowIfCancellationRequested();
             await RunLaunchAsync(phases[i].Launch, job.Engine, phases[i].Phase, cancellationToken);
+            if (_job.Status == HanhuaJobStatus.Cancelling) return;
+        }
+        var output = Path.Combine(work, "out");
+        _job = _job with { OutputPath = Directory.Exists(output) ? output : work };
+    }
+
+    private async Task RunImageCatchUpAsync(LocalChatSettings settings, HanhuaJob job, CancellationToken cancellationToken)
+    {
+        var work = job.WorkPath ?? HanhuaCommand.ImageWorkPath(settings.HanhuaPackRoot, job.Id);
+        Directory.CreateDirectory(work);
+        _job = job with { WorkPath = work, UpdatedUtc = DateTimeOffset.UtcNow };
+        foreach (var phase in HanhuaCatchUp.Phases(job.SourcePath, work))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var launch = phase switch
+            {
+                HanhuaPhase.Ocr => HanhuaCommand.ImageOcrCatchUp(settings, job.SourcePath, work),
+                HanhuaPhase.Fill => HanhuaCommand.ImageFill(settings, job.Engine, work),
+                HanhuaPhase.Typeset => HanhuaCommand.ImageTypesetCatchUp(settings, work),
+                _ => throw new InvalidOperationException(phase.ToString()),
+            };
+            await RunLaunchAsync(launch, job.Engine, phase, cancellationToken);
             if (_job.Status == HanhuaJobStatus.Cancelling) return;
         }
         var output = Path.Combine(work, "out");
@@ -413,12 +498,19 @@ public sealed partial class HanhuaPanel : UserControl
         KindBox.IsEnabled = !busy;
         EngineBox.IsEnabled = !busy;
         PickFolderButton.IsEnabled = !busy;
+        if (CatchUpHanhuaButton is not null)
+            CatchUpHanhuaButton.Visibility = !busy && CatchUpTarget() is not null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
     }
 
     private async Task ShowPreviewAsync(string? output)
     {
         if (string.IsNullOrWhiteSpace(output) || !Directory.Exists(output)) return;
-        var png = Directory.GetFiles(output, "*.png").OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault();
+        var png = Directory.GetFiles(output)
+            .Where(path => HanhuaCatchUp.ImageSuffixes.Contains(Path.GetExtension(path)))
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
         if (png is null) return;
         try
         {

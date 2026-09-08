@@ -40,6 +40,41 @@ def copy_pngs(src: Path, dest: Path) -> list[Path]:
     return local_qwen.copy_images(src, dest)
 
 
+def load_translations(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, val in data.items():
+        if isinstance(key, str):
+            out[key] = "" if val is None else str(val)
+    return out
+
+
+def merge_mapping(existing: dict[str, str], incoming: dict[str, str]) -> dict[str, str]:
+    merged = dict(existing)
+    for key, val in incoming.items():
+        current = merged.get(key, "")
+        if key not in merged:
+            merged[key] = val
+        elif (not current or current == key) and val and val != key:
+            merged[key] = val
+    return merged
+
+
+def mark_empty_ocr(pages: list[Path], dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    for img in pages:
+        path = dest / f"{img.stem}_ocr.json"
+        if not path.is_file():
+            path.write_text("[]", encoding="utf-8")
+
+
 def retry_missing_ocr(
     missing: list[Path],
     *,
@@ -120,10 +155,11 @@ def ocr_failed_message(rc: int, n_strings: int) -> str:
 def main() -> int:
     argv = list(sys.argv[1:])
     argv, jsonl = local_qwen.take_flag(argv, "--progress-jsonl")
+    argv, missing_only = local_qwen.take_flag(argv, "--missing-only")
     local_qwen.enable_progress(jsonl)
     if len(argv) < 2:
         print(
-            "usage: ocr_extract_local.py [--progress-jsonl] <image-dir> <work-dir>",
+            "usage: ocr_extract_local.py [--progress-jsonl] [--missing-only] <image-dir> <work-dir>",
             file=sys.stderr,
         )
         return 2
@@ -142,7 +178,21 @@ def main() -> int:
     typeset_in = work / "typeset_in"
     copied = copy_pngs(src, typeset_in)
     trans = work / "translations.json"
-    local_qwen.emit("phase", "ocr", done=0, total=len(copied), message=f"抽字 {len(copied)} 张")
+    dump = work / "ocr_dump"
+    dump.mkdir(parents=True, exist_ok=True)
+    sidecar = work / "ocr_sidecars"
+    ocr_dirs = [typeset_in, dump, sidecar]
+    missing = local_qwen.missing_ocr_pages(copied, ocr_dirs)
+    local_qwen.emit(
+        "phase", "ocr", done=0, total=len(missing) if missing_only else len(copied),
+        message=f"抽字 {len(missing) if missing_only else len(copied)} 张",
+    )
+    if missing_only and not missing:
+        print("ocr missing-only: no missing pages")
+        local_qwen.emit(
+            "done", "ocr", done=0, total=0, output=str(work), message="没有缺页"
+        )
+        return 0
 
     ok, detail = local_qwen.probe()
     if ok:
@@ -161,27 +211,11 @@ def main() -> int:
         print(f"missing {mit_py}", file=sys.stderr)
         return 1
 
-    dump = work / "ocr_dump"
-    dump.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
-    cmd = mit_ocr_command(mit_py, font, cfg, typeset_in, dump)
-    print("ocr", typeset_in, "->", dump)
-    rc = local_qwen.run_mit_with_page_progress(
-        cmd,
-        cwd=str(mit_root),
-        env=env,
-        phase="ocr",
-        total=len(copied),
-        count=lambda: local_qwen.completed_image_pages(
-            copied, ocr_dirs=[typeset_in, dump], output_dirs=[dump]
-        ),
-    )
-    print(f"mit_exit={rc}")
-
-    missing = local_qwen.missing_ocr_pages(copied, [typeset_in, dump])
-    if missing:
+    rc = 0
+    if missing_only:
         retry_missing_ocr(
             missing,
             work=work,
@@ -192,15 +226,46 @@ def main() -> int:
             dump=dump,
             env=env,
         )
-        still = local_qwen.missing_ocr_pages(copied, [typeset_in, dump])
-        if still:
-            preview = ", ".join(p.stem for p in still[:8])
-            extra = f" 等 {len(still)} 页" if len(still) > 8 else ""
-            local_qwen.log(f"抽字后仍无文字 {len(still)} 页: {preview}{extra}")
+    else:
+        cmd = mit_ocr_command(mit_py, font, cfg, typeset_in, dump)
+        print("ocr", typeset_in, "->", dump)
+        rc = local_qwen.run_mit_with_page_progress(
+            cmd,
+            cwd=str(mit_root),
+            env=env,
+            phase="ocr",
+            total=len(copied),
+            count=lambda: local_qwen.completed_image_pages(
+                copied, ocr_dirs=[typeset_in, dump], output_dirs=[dump]
+            ),
+        )
+        print(f"mit_exit={rc}")
+        missing = local_qwen.missing_ocr_pages(copied, [typeset_in, dump])
+        if missing:
+            retry_missing_ocr(
+                missing,
+                work=work,
+                mit_py=mit_py,
+                font=font,
+                cfg=cfg,
+                mit_root=mit_root,
+                dump=dump,
+                env=env,
+            )
+
+    still = local_qwen.missing_ocr_pages(copied, [typeset_in, dump, sidecar])
+    if still:
+        preview = ", ".join(p.stem for p in still[:8])
+        extra = f" 等 {len(still)} 页" if len(still) > 8 else ""
+        local_qwen.log(f"抽字后仍无文字 {len(still)} 页: {preview}{extra}")
+        mark_empty_ocr(still, dump)
 
     mapping = collect_mapping(typeset_in)
     mapping.update({k: v for k, v in collect_mapping(dump).items() if k not in mapping})
-    local_qwen.isolate_image_folder(typeset_in, work / "ocr_sidecars")
+    mapping.update({k: v for k, v in collect_mapping(sidecar).items() if k not in mapping})
+    local_qwen.isolate_image_folder(typeset_in, sidecar)
+    if missing_only:
+        mapping = merge_mapping(load_translations(trans), mapping)
     failed = ocr_failed_message(rc, len(mapping))
     if failed:
         local_qwen.log(failed)
@@ -209,9 +274,7 @@ def main() -> int:
 
     work.mkdir(parents=True, exist_ok=True)
     trans.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
-    still_missing = local_qwen.missing_ocr_pages(
-        copied, [typeset_in, dump, work / "ocr_sidecars"]
-    )
+    still_missing = local_qwen.missing_ocr_pages(copied, [typeset_in, dump, sidecar])
     print(f"ocr strings={len(mapping)} missing_pages={len(still_missing)} -> {trans}")
     local_qwen.emit(
         "done",

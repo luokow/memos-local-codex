@@ -2,7 +2,9 @@
 # Does not call Qwen. Stop Local AI first so Lama can use the 8GB GPU.
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -27,12 +29,74 @@ def find_input(root: Path) -> Path:
     raise RuntimeError(f"no typeset input image in {root}")
 
 
+def ocr_texts(path: Path) -> set[str]:
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    rows = parsed if isinstance(parsed, list) else [parsed]
+    texts: set[str] = set()
+    for row in rows:
+        if isinstance(row, dict) and row.get("text"):
+            texts.add(str(row["text"]))
+        elif isinstance(row, str) and row:
+            texts.add(row)
+    return texts
+
+
+def load_changed_keys(root: Path) -> set[str]:
+    path = root / "filled_keys.json"
+    if not path.is_file():
+        return set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if isinstance(data, list):
+        return {str(item) for item in data}
+    return set()
+
+
+def select_changed_images(root: Path, keys: set[str]) -> list[Path]:
+    src = find_input(root)
+    out = root / "out"
+    sidecar_dirs = (root / "ocr_sidecars", root / "ocr_dump", src)
+    selected: list[Path] = []
+    for img in local_qwen.list_image_files(src):
+        if not local_qwen.output_image_exists(out, img.stem):
+            selected.append(img)
+            continue
+        texts: set[str] = set()
+        for folder in sidecar_dirs:
+            ocr = folder / f"{img.stem}_ocr.json"
+            if ocr.is_file():
+                texts.update(ocr_texts(ocr))
+        repaired = {local_qwen.repair_ocr_bang(text) for text in texts}
+        if texts & keys or repaired & keys:
+            selected.append(img)
+    return selected
+
+
+def stage_changed_input(root: Path, images: list[Path]) -> Path:
+    staged = root / "typeset_changed"
+    if staged.exists():
+        shutil.rmtree(staged)
+    staged.mkdir(parents=True, exist_ok=True)
+    for img in images:
+        shutil.copy2(img, staged / img.name)
+    return staged
+
+
 def main() -> int:
     argv = list(sys.argv[1:])
     argv, jsonl = local_qwen.take_flag(argv, "--progress-jsonl")
+    argv, changed_only = local_qwen.take_flag(argv, "--changed-only")
     local_qwen.enable_progress(jsonl)
     if len(argv) < 1:
-        print("usage: typeset_ocr_local.py [--progress-jsonl] <work-folder>", file=sys.stderr)
+        print(
+            "usage: typeset_ocr_local.py [--progress-jsonl] [--changed-only] <work-folder>",
+            file=sys.stderr,
+        )
         return 2
     root = Path(argv[0]).resolve()
     trans = root / "translations.json"
@@ -40,6 +104,15 @@ def main() -> int:
         print(f"missing {trans}", file=sys.stderr)
         return 1
     src = find_input(root)
+    if changed_only:
+        selected = select_changed_images(root, load_changed_keys(root))
+        if not selected:
+            dest = root / "out"
+            dest.mkdir(parents=True, exist_ok=True)
+            print("typeset changed-only: no changed pages")
+            local_qwen.emit("done", "typeset", output=str(dest), message="没有改动页")
+            return 0
+        src = stage_changed_input(root, selected)
     local_qwen.isolate_image_folder(src, root / "ocr_sidecars")
     dest = root / "out"
     dest.mkdir(parents=True, exist_ok=True)

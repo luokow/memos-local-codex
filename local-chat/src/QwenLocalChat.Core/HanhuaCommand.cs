@@ -43,6 +43,9 @@ public static class HanhuaCommand
     public static HanhuaLaunch ImageOcr(LocalChatSettings settings, string sourcePath, string workPath)
         => Python(settings, "ocr_extract_local.py", ["--progress-jsonl", sourcePath, workPath], includeMit: true);
 
+    public static HanhuaLaunch ImageOcrCatchUp(LocalChatSettings settings, string sourcePath, string workPath)
+        => Python(settings, "ocr_extract_local.py", ["--progress-jsonl", "--missing-only", sourcePath, workPath], includeMit: true);
+
     public static HanhuaLaunch ImageFill(LocalChatSettings settings, HanhuaEngine engine, string workPath)
         => Python(
             settings,
@@ -53,6 +56,9 @@ public static class HanhuaCommand
 
     public static HanhuaLaunch ImageTypeset(LocalChatSettings settings, string workPath)
         => Python(settings, "typeset_ocr_local.py", ["--progress-jsonl", workPath], includeMit: true);
+
+    public static HanhuaLaunch ImageTypesetCatchUp(LocalChatSettings settings, string workPath)
+        => Python(settings, "typeset_ocr_local.py", ["--progress-jsonl", "--changed-only", workPath], includeMit: true);
 
     public static HanhuaGpuNeed GpuNeed(HanhuaKind kind, HanhuaEngine engine, HanhuaPhase phase)
     {

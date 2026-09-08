@@ -206,6 +206,8 @@ var tests = new (string Name, Action Body)[]
     ("hanhua-settings-default-and-roundtrip", HanhuaSettingsDefaultAndRoundTrip),
     ("hanhua-game-command-local-and-aliyun", HanhuaGameCommandLocalAndAliyun),
     ("hanhua-image-commands-order-and-engine", HanhuaImageCommandsOrderAndEngine),
+    ("hanhua-catch-up-reuses-work-and-skips-ocr-when-complete", HanhuaCatchUpReusesWorkAndSkipsOcrWhenComplete),
+    ("hanhua-catch-up-commands-pass-missing-and-changed-flags", HanhuaCatchUpCommandsPassMissingAndChangedFlags),
     ("hanhua-progress-parses-jsonl-and-plain-lines", HanhuaProgressParsesJsonlAndPlainLines),
     ("hanhua-progress-formats-elapsed-and-remaining-like-video", HanhuaProgressFormatsElapsedAndRemainingLikeVideo),
     ("hanhua-progress-waits-before-eta-and-uses-page-units", HanhuaProgressWaitsBeforeEtaAndUsesPageUnits),
@@ -4053,6 +4055,71 @@ static void HanhuaImageCommandsOrderAndEngine()
         Equal(settings.HanhuaMitRoot, ocr.Environment[HanhuaCommand.MitRootEnv], "OCR must receive HANHUA_MIT_ROOT");
         Equal(settings.HanhuaMitRoot, typeset.Environment[HanhuaCommand.MitRootEnv], "typeset must receive HANHUA_MIT_ROOT");
         Equal(false, fillLocal.Environment.ContainsKey(HanhuaCommand.MitRootEnv), "fill does not need MIT");
+    }
+    finally { Directory.Delete(root, recursive: true); }
+}
+
+static void HanhuaCatchUpReusesWorkAndSkipsOcrWhenComplete()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"hanhua-catchup-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        var source = Path.Combine(root, "src");
+        var work = Path.Combine(root, "work");
+        var typesetIn = Path.Combine(work, "typeset_in");
+        var sidecars = Path.Combine(work, "ocr_sidecars");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(typesetIn);
+        Directory.CreateDirectory(sidecars);
+        File.WriteAllBytes(Path.Combine(source, "002.png"), [1]);
+        File.WriteAllBytes(Path.Combine(typesetIn, "002.png"), [1]);
+        File.WriteAllText(Path.Combine(sidecars, "002_ocr.json"), "[]");
+        File.WriteAllText(Path.Combine(work, "translations.json"), "{\"おはよう\":\"\"}");
+
+        var ready = new HanhuaJob(
+            "done-img", HanhuaKind.Image, HanhuaEngine.LocalQwen, HanhuaPhase.Typeset,
+            HanhuaJobStatus.Succeeded, source, work, Path.Combine(work, "out"),
+            1, 1, "ok", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        Equal(true, HanhuaCatchUp.CanCatchUp(ready), "succeeded image job with translations can catch up");
+        Equal(false, HanhuaCatchUp.NeedsOcr(source, work), "complete sidecars skip OCR on catch-up");
+        var phases = HanhuaCatchUp.Phases(source, work);
+        Equal(HanhuaPhase.Fill, phases[0], "catch-up starts at fill when OCR is complete");
+        Equal(HanhuaPhase.Typeset, phases[^1], "catch-up still typesets after fill");
+
+        var begun = HanhuaCatchUp.Begin(ready);
+        Equal(ready.Id, begun.Id, "catch-up keeps the same job id");
+        Equal(ready.WorkPath, begun.WorkPath, "catch-up reuses the work folder");
+        Equal(HanhuaJobStatus.Running, begun.Status, "catch-up marks the job running");
+        Equal(HanhuaPhase.Fill, begun.Phase, "begin uses the first catch-up phase");
+
+        File.WriteAllBytes(Path.Combine(source, "001_Cover.jpg"), [2]);
+        Equal(true, HanhuaCatchUp.NeedsOcr(source, work), "a new jpg cover requires missing-only OCR");
+
+        var game = ready with { Kind = HanhuaKind.Game, Phase = HanhuaPhase.Inject };
+        Equal(false, HanhuaCatchUp.CanCatchUp(game), "game jobs do not use image catch-up");
+        Equal(false, HanhuaCatchUp.CanCatchUp(ready with { Status = HanhuaJobStatus.Running }), "active jobs cannot catch up");
+        Equal(false, HanhuaCatchUp.CanCatchUp(ready with { WorkPath = Path.Combine(root, "missing") }), "missing work folder cannot catch up");
+    }
+    finally { Directory.Delete(root, recursive: true); }
+}
+
+static void HanhuaCatchUpCommandsPassMissingAndChangedFlags()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"hanhua-catchup-cmd-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        var settings = HanhuaFixtureSettings(root);
+        var src = Path.Combine(root, "pngs");
+        var work = HanhuaCommand.ImageWorkPath(settings.HanhuaPackRoot, "job-1");
+        Directory.CreateDirectory(src);
+        var ocr = HanhuaCommand.ImageOcrCatchUp(settings, src, work);
+        var typeset = HanhuaCommand.ImageTypesetCatchUp(settings, work);
+        Equal(true, ocr.Arguments.Contains("--missing-only"), "catch-up OCR only processes missing pages");
+        Equal(true, typeset.Arguments.Contains("--changed-only"), "catch-up typeset only paints changed pages");
+        Equal(false, HanhuaCommand.ImageOcr(settings, src, work).Arguments.Contains("--missing-only"), "full OCR does not pass missing-only");
+        Equal(false, HanhuaCommand.ImageTypeset(settings, work).Arguments.Contains("--changed-only"), "full typeset does not pass changed-only");
     }
     finally { Directory.Delete(root, recursive: true); }
 }

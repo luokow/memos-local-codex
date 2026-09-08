@@ -391,6 +391,91 @@ class ImagePipelineQualityTests(unittest.TestCase):
             )
             self.assertGreaterEqual(len(calls), 2)
             self.assertIn("えっ！", calls[0])
+            filled_keys = json.loads(
+                (dest.parent / "filled_keys.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("えっ1!", filled_keys)
+            self.assertIn(
+                "自由奔放なゆるふわ系ギャルで姉達同様スタイル抜群で", filled_keys
+            )
+
+    def test_ocr_missing_only_merges_and_skips_complete_pages(self) -> None:
+        import tempfile
+        import ocr_extract_local
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "src"
+            work = Path(tmp) / "work"
+            typeset_in = work / "typeset_in"
+            sidecars = work / "ocr_sidecars"
+            src.mkdir()
+            typeset_in.mkdir(parents=True)
+            sidecars.mkdir()
+            (src / "002.png").write_bytes(b"png")
+            (typeset_in / "002.png").write_bytes(b"png")
+            (sidecars / "002_ocr.json").write_text(
+                '[{"text":"おはよう"}]', encoding="utf-8"
+            )
+            trans = work / "translations.json"
+            trans.write_text(
+                json.dumps({"おはよう": "早上好"}, ensure_ascii=False), encoding="utf-8"
+            )
+            old = sys.argv
+            try:
+                sys.argv = [
+                    "ocr_extract_local.py",
+                    "--missing-only",
+                    str(src),
+                    str(work),
+                ]
+                rc = ocr_extract_local.main()
+            finally:
+                sys.argv = old
+            self.assertEqual(rc, 0)
+            saved = json.loads(trans.read_text(encoding="utf-8"))
+            self.assertEqual(saved["おはよう"], "早上好")
+
+    def test_merge_mapping_keeps_filled_and_adds_new(self) -> None:
+        import ocr_extract_local
+
+        merged = ocr_extract_local.merge_mapping(
+            {"おはよう": "早上好", "空": ""},
+            {"おはよう": "", "新しい": "", "空": "已有"},
+        )
+        self.assertEqual(merged["おはよう"], "早上好")
+        self.assertEqual(merged["新しい"], "")
+        self.assertEqual(merged["空"], "已有")
+
+    def test_changed_pages_selects_filled_keys_and_missing_output(self) -> None:
+        import tempfile
+        import typeset_ocr_local
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "typeset_in"
+            sidecars = root / "ocr_sidecars"
+            out = root / "out"
+            src.mkdir()
+            sidecars.mkdir()
+            out.mkdir()
+            (src / "keep.png").write_bytes(b"k")
+            (src / "change.png").write_bytes(b"c")
+            (src / "cover.jpg").write_bytes(b"j")
+            (out / "keep.png").write_bytes(b"done")
+            (out / "change.png").write_bytes(b"old")
+            (sidecars / "keep_ocr.json").write_text(
+                '[{"text":"ドスン！"}]', encoding="utf-8"
+            )
+            (sidecars / "change_ocr.json").write_text(
+                '[{"text":"おはよう"}]', encoding="utf-8"
+            )
+            selected = [
+                p.name
+                for p in typeset_ocr_local.select_changed_images(
+                    root, {"おはよう"}
+                )
+            ]
+            self.assertEqual(selected, ["change.png", "cover.jpg"])
 
 
 if __name__ == "__main__":
