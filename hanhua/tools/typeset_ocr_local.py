@@ -1,5 +1,7 @@
 # Typeset already-filled translations.json with manga-image-translator (translator=none).
-# Does not call Qwen. Stop Local AI first so Lama can use the 8GB GPU.
+# MIT Lama is the only renderer. After MIT, restore pen-name / art MIT should
+# not have painted. Do not CPU-overlay on the Lama canvas. Does not call Qwen.
+# Stop Local AI first so Lama can use the 8GB GPU.
 from __future__ import annotations
 
 import json
@@ -11,6 +13,7 @@ from pathlib import Path
 import local_qwen
 
 CONFIG_CANDIDATES = (
+    Path(__file__).resolve().parent.parent / "mit_config.json",
     Path(r"D:\grok\c108_work\config.json"),
     Path(r"D:\grok\hana_work\config.json"),
 )
@@ -91,10 +94,21 @@ def main() -> int:
     argv = list(sys.argv[1:])
     argv, jsonl = local_qwen.take_flag(argv, "--progress-jsonl")
     argv, changed_only = local_qwen.take_flag(argv, "--changed-only")
+    pages: list[str] | None = None
+    if "--pages" in argv:
+        idx = argv.index("--pages")
+        if idx + 1 >= len(argv):
+            print(
+                "usage: typeset_ocr_local.py [--progress-jsonl] [--changed-only] [--pages a,b] <work-folder>",
+                file=sys.stderr,
+            )
+            return 2
+        pages = [part.strip() for part in argv[idx + 1].split(",") if part.strip()]
+        argv = argv[:idx] + argv[idx + 2 :]
     local_qwen.enable_progress(jsonl)
     if len(argv) < 1:
         print(
-            "usage: typeset_ocr_local.py [--progress-jsonl] [--changed-only] <work-folder>",
+            "usage: typeset_ocr_local.py [--progress-jsonl] [--changed-only] [--pages a,b] <work-folder>",
             file=sys.stderr,
         )
         return 2
@@ -104,7 +118,20 @@ def main() -> int:
         print(f"missing {trans}", file=sys.stderr)
         return 1
     src = find_input(root)
-    if changed_only:
+    restore_stems = pages
+    if pages:
+        wanted = {item.lower() for item in pages}
+        selected = [
+            img
+            for img in local_qwen.list_image_files(src)
+            if img.stem.lower() in wanted or img.name.lower() in wanted
+        ]
+        if not selected:
+            print(f"typeset --pages: no matching images in {src}", file=sys.stderr)
+            return 1
+        src = stage_changed_input(root, selected)
+        restore_stems = [img.stem for img in selected]
+    elif changed_only:
         selected = select_changed_images(root, load_changed_keys(root))
         if not selected:
             dest = root / "out"
@@ -113,6 +140,7 @@ def main() -> int:
             local_qwen.emit("done", "typeset", output=str(dest), message="没有改动页")
             return 0
         src = stage_changed_input(root, selected)
+        restore_stems = [img.stem for img in selected]
     local_qwen.isolate_image_folder(src, root / "ocr_sidecars")
     dest = root / "out"
     dest.mkdir(parents=True, exist_ok=True)
@@ -149,10 +177,12 @@ def main() -> int:
         str(src),
         "-o",
         str(dest),
+        *local_qwen.mit_dict_args(),
     ]
     print("typeset", src, "->", dest)
     print("lookup", trans)
     images = local_qwen.list_image_files(src)
+    baseline = local_qwen.snapshot_output_mtimes(images, [dest])
     local_qwen.emit(
         "phase", "typeset", done=0, total=len(images), message=f"{src} -> {dest}"
     )
@@ -162,9 +192,14 @@ def main() -> int:
         env=env,
         phase="typeset",
         total=len(images),
-        count=lambda: local_qwen.completed_image_pages(images, output_dirs=[dest]),
+        count=lambda: local_qwen.completed_image_pages(
+            images, output_dirs=[dest], baseline=baseline
+        ),
     )
     print(f"mit_exit={rc}")
+    import bubble_recall_local
+
+    bubble_recall_local.restore_source_art(root, restore_stems)
     if rc == 0:
         local_qwen.emit("done", "typeset", output=str(dest), message="嵌字完成")
         return 0

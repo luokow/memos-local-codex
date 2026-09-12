@@ -54,6 +54,7 @@
                             <SelectorBar x:Name="SettingsSectionSelector" AutomationProperties.AutomationId="SettingsSectionSelector" SelectionChanged="SettingsSectionSelector_SelectionChanged">
                                 <SelectorBarItem x:Name="TextSettingsSectionItem" Text="文本模型" />
                                 <SelectorBarItem x:Name="VideoSettingsSectionItem" Text="视频模型" />
+                                <SelectorBarItem x:Name="HanhuaSettingsSectionItem" Text="汉化" />
                             </SelectorBar>
                         </StackPanel>
                         <Button Grid.Column="1" AutomationProperties.AutomationId="CloseSettingsButton" AutomationProperties.Name="关闭设置" Content="关闭" Click="CloseButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="关闭面板；若有未保存修改会先确认" VerticalAlignment="Top" />
@@ -255,13 +256,6 @@
                                     </Border>
                                     <ToggleSwitch x:Name="AutoStartOnDemandToggle" AutomationProperties.AutomationId="AutoStartOnDemandSetting" Grid.Row="1" Grid.ColumnSpan="2" Header="记忆调用按需启动模型" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="MemOS 的 recall 和 remember 在服务停止时可启动共享模型；健康检查和列表查询不会启动" />
                                 </Grid>
-                                <StackPanel Spacing="2" Margin="0,8,0,0">
-                                    <TextBlock Text="汉化路径" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
-                                    <TextBlock Text="即时。默认已填本机路径，可改。汉化页调度现有 Python 脚本。密钥仍在原配置里，不要填到这里。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                </StackPanel>
-                                <TextBox x:Name="HanhuaPackRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPackRootSetting" Header="汉化工具包根目录" TextWrapping="Wrap" />
-                                <TextBox x:Name="HanhuaPythonExeBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPythonExeSetting" Header="Python 可执行文件" TextWrapping="Wrap" />
-                                <TextBox x:Name="HanhuaMitRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaMitRootSetting" Header="manga-image-translator 根目录" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 
@@ -441,6 +435,58 @@
                                     </ComboBox>
                                 </Grid>
                             </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel x:Name="HanhuaSettingsSection" Visibility="Collapsed" Spacing="12">
+                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
+                                <StackPanel Spacing="8">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="汉化路径" Style="{StaticResource SettingsSectionTitleStyle}" />
+                                        <TextBlock Text="即时。用浏览选择目录和文件，不要手填本机绝对路径。汉化页调度现有 Python 脚本。密钥仍在原配置里，不要填到这里。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="HanhuaPackRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPackRootSetting" Header="汉化工具包根目录" PlaceholderText="选择内嵌汉化工具包目录" TextWrapping="Wrap" />
+                                        <Button Grid.Column="1" x:Name="HanhuaPackRootPickButton" AutomationProperties.AutomationId="HanhuaPackRootPickButton" AutomationProperties.Name="浏览汉化工具包目录" Content="浏览" Click="HanhuaPackRootPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
+                                    </Grid>
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="HanhuaPythonExeBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPythonExeSetting" Header="Python 可执行文件" PlaceholderText="选择 python.exe" TextWrapping="Wrap" />
+                                        <Button Grid.Column="1" x:Name="HanhuaPythonExePickButton" AutomationProperties.AutomationId="HanhuaPythonExePickButton" AutomationProperties.Name="浏览 Python 可执行文件" Content="浏览" Click="HanhuaPythonExePickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
+                                    </Grid>
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="HanhuaMitRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaMitRootSetting" Header="manga-image-translator 根目录" PlaceholderText="选择 MIT 目录" TextWrapping="Wrap" />
+                                        <Button Grid.Column="1" x:Name="HanhuaMitRootPickButton" AutomationProperties.AutomationId="HanhuaMitRootPickButton" AutomationProperties.Name="浏览 MIT 目录" Content="浏览" Click="HanhuaMitRootPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
+                                    </Grid>
+                                    <ComboBox
+                                        x:Name="HanhuaFillProfileBox"
+                                        AutomationProperties.AutomationId="HanhuaFillProfileSetting"
+                                        AutomationProperties.Name="汉化填字模型"
+                                        Header="填字模型档案"
+                                        HorizontalAlignment="Stretch"
+                                        DisplayMemberPath="DisplayName"
+                                        SelectionChanged="HanhuaFillProfileBox_SelectionChanged" />
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="HanhuaFillModelPathBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaFillModelPathSetting" Header="填字模型文件" PlaceholderText="选择填字 GGUF" TextWrapping="Wrap" />
+                                        <Button Grid.Column="1" x:Name="HanhuaFillModelPickButton" AutomationProperties.AutomationId="HanhuaFillModelPickButton" AutomationProperties.Name="浏览填字模型文件" Content="浏览" Click="HanhuaFillModelPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
+                                    </Grid>
+                                    <TextBlock Text="填字档案和 GGUF 路径都可以改，不影响聊天默认档案。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
                             </Border>
                         </StackPanel>
 

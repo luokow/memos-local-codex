@@ -34,7 +34,7 @@
                         <StackPanel x:Name="HanhuaEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6" MaxWidth="420">
                             <TextBlock
                                 x:Name="HanhuaEmptyStateHint"
-                                Text="选含 Game.exe 的目录，点开始汉化即可。会自动复制、抽字、翻译、回写。不用点右上角启动。"
+                                Text="选 RPG Maker（Game.exe）或 Unity 游戏目录，点开始汉化即可。不用点右上角启动。"
                                 Style="{StaticResource StatusTextStyle}"
                                 TextWrapping="Wrap"
                                 TextAlignment="Center" />
@@ -49,6 +49,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
@@ -89,7 +90,21 @@
                     <Button Grid.Column="1" x:Name="PickFolderButton" AutomationProperties.AutomationId="HanhuaPickFolderButton" AutomationProperties.Name="选择目录" Content="选择目录" Click="PickFolderButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Center" />
                     <Button Grid.Column="2" x:Name="ComposerStartButton" AutomationProperties.AutomationId="HanhuaComposerStartButton" AutomationProperties.Name="开始汉化" Content="开始汉化" Click="StartOrCancel_Click" Style="{StaticResource VideoPrimaryButtonStyle}" VerticalAlignment="Center" />
                 </Grid>
-                <TextBlock x:Name="HanhuaComposerHint" Grid.Row="2" Grid.ColumnSpan="2" Text="自动四步：复制 → 抽字 → 翻译 → 回写。本机 Qwen 会自动启动。" Style="{StaticResource ComposerHintTextStyle}" Margin="4,2,0,0" />
+                <Border x:Name="DuplicateConfirmBar" Grid.Row="2" Grid.ColumnSpan="2" Visibility="Collapsed" Margin="0,6,0,0" Padding="10,8" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="10">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="DuplicateConfirmText" Text="这个目录已经汉化过。接着上次只补未译对白和缺页；全新会整本重抽。" Style="{StaticResource StatusTextStyle}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Button x:Name="DuplicateContinueButton" AutomationProperties.AutomationId="HanhuaDuplicateContinueButton" AutomationProperties.Name="接着上次汉化" Content="接着上次" Click="DuplicateContinueButton_Click" Style="{StaticResource VideoPrimaryButtonStyle}" MinWidth="96" />
+                            <Button x:Name="DuplicateFreshButton" AutomationProperties.AutomationId="HanhuaDuplicateFreshButton" AutomationProperties.Name="全新汉化" Content="全新" Click="DuplicateFreshButton_Click" Style="{StaticResource ToolbarButtonStyle}" MinWidth="72" />
+                            <Button x:Name="DuplicateCancelButton" AutomationProperties.AutomationId="HanhuaDuplicateCancelButton" AutomationProperties.Name="取消重复汉化" Content="取消" Click="DuplicateCancelButton_Click" Style="{StaticResource ToolbarButtonStyle}" MinWidth="72" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <TextBlock x:Name="HanhuaComposerHint" Grid.Row="3" Grid.ColumnSpan="2" Text="RPG Maker：复制 → 抽字 → 翻译 → 回写。Unity：装插件 → 预填已抽出的句子。本机模型会自动启动。" Style="{StaticResource ComposerHintTextStyle}" Margin="4,2,0,0" />
             </Grid>
         </Border>
 

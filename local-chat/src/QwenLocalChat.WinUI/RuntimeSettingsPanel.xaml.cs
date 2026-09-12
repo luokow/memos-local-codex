@@ -10,10 +10,14 @@ using Windows.Globalization.NumberFormatting;
 
 namespace QwenLocalChat_WinUI;
 
-public sealed class SettingsSaveRequestedEventArgs(LocalChatSettings settings, VideoModelProfile editedVideoProfile) : EventArgs
+public sealed class SettingsSaveRequestedEventArgs(
+    LocalChatSettings settings,
+    VideoModelProfile editedVideoProfile,
+    TextModelProfile? editedHanhuaFillProfile = null) : EventArgs
 {
     public LocalChatSettings Settings { get; } = settings;
     public VideoModelProfile EditedVideoProfile { get; } = editedVideoProfile;
+    public TextModelProfile? EditedHanhuaFillProfile { get; } = editedHanhuaFillProfile;
 }
 
 public sealed partial class RuntimeSettingsPanel : UserControl
@@ -52,6 +56,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     public event EventHandler? VideoImportRequested;
     public event EventHandler? ReleaseTextModelRequested;
     public event EventHandler? ReleaseVideoModelRequested;
+    public event EventHandler<string>? HanhuaPathPickRequested;
     /// <summary>Raised after the panel is fully closed (animation finished or instant hide).</summary>
     public event EventHandler? Closed;
 
@@ -59,7 +64,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         LocalChatSettings settings,
         ModelProfileCatalog textProfiles,
         VideoModelProfileCatalog videoProfiles,
-        bool videoSection = false)
+        string section = SettingsSectionKind.Text)
     {
         _isClosing = false;
         DetachCloseBatch();
@@ -68,8 +73,14 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         _videoProfiles = videoProfiles;
         HideDiscardConfirm();
         Populate(settings);
-        SettingsSectionSelector.SelectedItem = videoSection ? VideoSettingsSectionItem : TextSettingsSectionItem;
-        ApplySectionVisibility(videoSection);
+        var kind = SettingsSectionKind.Normalize(section);
+        SettingsSectionSelector.SelectedItem = kind switch
+        {
+            SettingsSectionKind.Video => VideoSettingsSectionItem,
+            SettingsSectionKind.Hanhua => HanhuaSettingsSectionItem,
+            _ => TextSettingsSectionItem,
+        };
+        ApplySectionVisibility(kind);
         IsEnabled = true;
         IsHitTestVisible = true;
         Opacity = 1;
@@ -214,13 +225,23 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     }
 
     private void SettingsSectionSelector_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
-        => ApplySectionVisibility(sender.SelectedItem == VideoSettingsSectionItem);
+        => ApplySectionVisibility(CurrentSection);
 
-    private void ApplySectionVisibility(bool videoSection)
+    private string CurrentSection
+        => SettingsSectionSelector.SelectedItem == HanhuaSettingsSectionItem ? SettingsSectionKind.Hanhua
+            : SettingsSectionSelector.SelectedItem == VideoSettingsSectionItem ? SettingsSectionKind.Video
+            : SettingsSectionKind.Text;
+
+    private void ApplySectionVisibility(string section)
     {
-        TextSettingsSection.Visibility = videoSection ? Visibility.Collapsed : Visibility.Visible;
-        VideoSettingsSection.Visibility = videoSection ? Visibility.Visible : Visibility.Collapsed;
-        VideoProfileParametersExpander.IsExpanded = videoSection;
+        if (TextSettingsSection is null || VideoSettingsSection is null || HanhuaSettingsSection is null)
+            return;
+        var kind = SettingsSectionKind.Normalize(section);
+        TextSettingsSection.Visibility = kind == SettingsSectionKind.Text ? Visibility.Visible : Visibility.Collapsed;
+        VideoSettingsSection.Visibility = kind == SettingsSectionKind.Video ? Visibility.Visible : Visibility.Collapsed;
+        HanhuaSettingsSection.Visibility = kind == SettingsSectionKind.Hanhua ? Visibility.Visible : Visibility.Collapsed;
+        if (VideoProfileParametersExpander is not null)
+            VideoProfileParametersExpander.IsExpanded = kind == SettingsSectionKind.Video;
         ResetSettingsScroll();
     }
 
@@ -346,9 +367,10 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         SelectTaggedItem(VideoOutputFormatBox, video.OutputFormat);
         SelectTaggedItem(VideoCodecBox, video.VideoCodec);
         AutoStartOnDemandToggle.IsOn = settings.AutoStartOnDemand;
-        HanhuaPackRootBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPackRoot, LocalChatSettings.DefaultHanhuaPackRoot);
-        HanhuaPythonExeBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPythonExe, LocalChatSettings.DefaultHanhuaPythonExe);
-        HanhuaMitRootBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaMitRoot, LocalChatSettings.DefaultHanhuaMitRoot);
+        HanhuaPackRootBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPackRoot);
+        HanhuaPythonExeBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPythonExe);
+        HanhuaMitRootBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaMitRoot);
+        PopulateHanhuaFillProfile(settings.HanhuaFillProfileId);
         SelectSessionSortMode(settings.SessionSortMode);
         var attachments = settings.ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults;
         ChatAttachTextToggle.IsOn = attachments.AllowText;
@@ -368,6 +390,64 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         _populatingProfiles = false;
         AttachNumberBoxEditDisplay();
     }
+
+    private void PopulateHanhuaFillProfile(string? selectedId)
+    {
+        if (HanhuaFillProfileBox is null) return;
+        HanhuaFillProfileBox.ItemsSource = _textProfiles?.Profiles;
+        if (_textProfiles is null)
+        {
+            HanhuaFillProfileBox.SelectedItem = null;
+            if (HanhuaFillModelPathBox is not null) HanhuaFillModelPathBox.Text = "";
+            return;
+        }
+        HanhuaFillProfileBox.SelectedItem = _textProfiles.FindHanhuaFillProfile(selectedId);
+        SyncHanhuaFillModelPath();
+    }
+
+    private void SyncHanhuaFillModelPath()
+    {
+        if (HanhuaFillModelPathBox is null) return;
+        HanhuaFillModelPathBox.Text = (HanhuaFillProfileBox.SelectedItem as TextModelProfile)?.Service.ModelPath ?? "";
+    }
+
+    private void HanhuaFillProfileBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_populatingProfiles) return;
+        SyncHanhuaFillModelPath();
+    }
+
+    public void SetHanhuaPath(string kind, string path)
+    {
+        var value = LocalChatSettings.CoalesceHanhuaPath(path);
+        switch (kind)
+        {
+            case HanhuaSettingsPathKind.PackRoot:
+                HanhuaPackRootBox.Text = value;
+                break;
+            case HanhuaSettingsPathKind.PythonExe:
+                HanhuaPythonExeBox.Text = value;
+                break;
+            case HanhuaSettingsPathKind.MitRoot:
+                HanhuaMitRootBox.Text = value;
+                break;
+            case HanhuaSettingsPathKind.FillModel:
+                HanhuaFillModelPathBox.Text = value;
+                break;
+        }
+    }
+
+    private void HanhuaPackRootPickButton_Click(object sender, RoutedEventArgs e)
+        => HanhuaPathPickRequested?.Invoke(this, HanhuaSettingsPathKind.PackRoot);
+
+    private void HanhuaPythonExePickButton_Click(object sender, RoutedEventArgs e)
+        => HanhuaPathPickRequested?.Invoke(this, HanhuaSettingsPathKind.PythonExe);
+
+    private void HanhuaMitRootPickButton_Click(object sender, RoutedEventArgs e)
+        => HanhuaPathPickRequested?.Invoke(this, HanhuaSettingsPathKind.MitRoot);
+
+    private void HanhuaFillModelPickButton_Click(object sender, RoutedEventArgs e)
+        => HanhuaPathPickRequested?.Invoke(this, HanhuaSettingsPathKind.FillModel);
 
     private TextModelProfile? SelectedTextProfile => TextModelProfileBox.SelectedItem as TextModelProfile;
     private VideoModelProfile? SelectedVideoProfile => VideoModelProfileBox.SelectedItem as VideoModelProfile;
@@ -390,6 +470,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         _populatingProfiles = true;
         TextModelProfileBox.ItemsSource = profiles.Profiles;
         TextModelProfileBox.SelectedItem = profiles.Resolve(selectedId);
+        PopulateHanhuaFillProfile(_original.HanhuaFillProfileId);
         _populatingProfiles = false;
         UpdateTextProfileDetails();
     }
@@ -587,9 +668,10 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             ModelPath = ModelPathBox.Text.Trim(),
             Port = Whole(PortBox),
             AutoStartOnDemand = AutoStartOnDemandToggle.IsOn,
-            HanhuaPackRoot = LocalChatSettings.CoalesceHanhuaPath(HanhuaPackRootBox.Text, LocalChatSettings.DefaultHanhuaPackRoot),
-            HanhuaPythonExe = LocalChatSettings.CoalesceHanhuaPath(HanhuaPythonExeBox.Text, LocalChatSettings.DefaultHanhuaPythonExe),
-            HanhuaMitRoot = LocalChatSettings.CoalesceHanhuaPath(HanhuaMitRootBox.Text, LocalChatSettings.DefaultHanhuaMitRoot),
+            HanhuaPackRoot = LocalChatSettings.CoalesceHanhuaPath(HanhuaPackRootBox.Text),
+            HanhuaPythonExe = LocalChatSettings.CoalesceHanhuaPath(HanhuaPythonExeBox.Text),
+            HanhuaMitRoot = LocalChatSettings.CoalesceHanhuaPath(HanhuaMitRootBox.Text),
+            HanhuaFillProfileId = (HanhuaFillProfileBox.SelectedItem as TextModelProfile)?.Id ?? "",
             HanhuaEngine = HanhuaEngineCodec.ToJson(HanhuaEngineCodec.Parse(_original.HanhuaEngine)),
             SelectedTextProfileId = SelectedTextProfile?.Id,
             SelectedVideoProfileId = SelectedVideoProfile?.Id,
@@ -661,8 +743,19 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         };
     }
 
+    private TextModelProfile? BuildEditedHanhuaFillProfile()
+    {
+        if (HanhuaFillProfileBox.SelectedItem is not TextModelProfile selected) return null;
+        var path = LocalChatSettings.CoalesceHanhuaPath(HanhuaFillModelPathBox.Text);
+        if (string.IsNullOrWhiteSpace(path) || string.Equals(path, selected.Service.ModelPath, StringComparison.OrdinalIgnoreCase))
+            return selected;
+        return selected with { Service = selected.Service with { ModelPath = path } };
+    }
+
     internal bool IsDirty()
-        => !BuildDraft().IsSameAs(_original) || BuildEditedVideoProfile() != SelectedVideoProfile;
+        => !BuildDraft().IsSameAs(_original)
+           || BuildEditedVideoProfile() != SelectedVideoProfile
+           || BuildEditedHanhuaFillProfile() != (HanhuaFillProfileBox.SelectedItem as TextModelProfile);
 
     private void EnsurePhraseEditors()
     {
@@ -718,12 +811,23 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     private void ResetButton_Click(object sender, RoutedEventArgs e)
     {
         HideDiscardConfirm();
-        if (SettingsSectionSelector.SelectedItem == VideoSettingsSectionItem)
+        if (CurrentSection == SettingsSectionKind.Video)
         {
             Populate(BuildDraft() with
             {
                 VideoGeneration = VideoGenerationSettings.SafeDefaults,
                 VideoPromptPhrases = VideoPromptTemplatePhrases.OfficialDefaults,
+            });
+            return;
+        }
+        if (CurrentSection == SettingsSectionKind.Hanhua)
+        {
+            Populate(BuildDraft() with
+            {
+                HanhuaPackRoot = "",
+                HanhuaPythonExe = "",
+                HanhuaMitRoot = "",
+                HanhuaFillProfileId = "",
             });
             return;
         }
@@ -810,7 +914,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             ValidationInfo.IsOpen = true;
             return;
         }
-        SaveRequested?.Invoke(this, new SettingsSaveRequestedEventArgs(candidate, editedVideoProfile));
+        SaveRequested?.Invoke(this, new SettingsSaveRequestedEventArgs(candidate, editedVideoProfile, BuildEditedHanhuaFillProfile()));
     }
 
     private static int Whole(NumberBox box) => SettingsNumberInput.Whole(box.Text, box.Value);

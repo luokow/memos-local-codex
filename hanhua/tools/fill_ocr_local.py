@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+import bubble_recall_local
+import cjk_wrap
 import local_qwen
 import translate_direct
 
@@ -54,19 +56,73 @@ def collect_from_dir(root: Path) -> tuple[dict[str, str], Path]:
     return mapping, trans_path
 
 
-def _translate_batch(batch: list[str], *, engine: str) -> list[str]:
+def _translate_batch(
+    batch: list[str], *, engine: str, retry: bool = False, glossary: str = ""
+) -> list[str]:
     if engine == "local":
-        return local_qwen.translate_texts(batch, system=local_qwen.IMAGE_SYSTEM)
+        model = local_qwen.fill_local_model()
+        if local_qwen.is_galtransl_model(model):
+            return local_qwen.translate_texts(
+                batch, model=model, glossary=glossary
+            )
+        system = local_qwen.IMAGE_RETRY_SYSTEM if retry else local_qwen.IMAGE_SYSTEM
+        if glossary:
+            system = system + "译名表：" + glossary
+        return local_qwen.translate_texts(batch, system=system, model=model)
     url, key, model = translate_direct.load_upstream()
     return translate_direct.call(url, key, model, batch, engine="mt")
 
 
-def pending_keys(data: dict[str, str], originals: list[str]) -> list[str]:
-    return [
-        key
-        for key in originals
-        if key not in SKIP and not local_qwen.translation_ok(key, data.get(key, ""))
-    ]
+def pending_keys(
+    data: dict[str, str],
+    originals: list[str],
+    *,
+    rewrite: bool = False,
+    line_sources: dict[str, str] | None = None,
+) -> list[str]:
+    pending: list[str] = []
+    original_set = set(originals)
+    sources = line_sources or {}
+    for key in originals:
+        if key in SKIP:
+            continue
+        if bubble_recall_local.skip_as_art(key, overlay=False):
+            continue
+        cleaned = local_qwen.repair_ocr_bang(key)
+        if cleaned != key and cleaned in original_set:
+            continue
+        dst = data.get(key, "")
+        if not local_qwen.translation_ok(key, dst):
+            pending.append(key)
+            continue
+        lined = sources.get(key) or sources.get(cleaned) or ""
+        if "\n" in lined and "\n" not in str(dst):
+            pending.append(key)
+            continue
+        if rewrite and not local_qwen.skip_rewrite(key):
+            pending.append(key)
+    return pending
+
+
+def _iter_batches(
+    keys: list[str], chunk: int, line_sources: dict[str, str]
+):
+    batch: list[str] = []
+    size = max(1, int(chunk))
+    for key in keys:
+        query = cjk_wrap.fill_query(key, line_sources)
+        if "\n" in query:
+            if batch:
+                yield batch
+                batch = []
+            yield [key]
+            continue
+        batch.append(key)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 def translate_mapping(
@@ -75,13 +131,38 @@ def translate_mapping(
     *,
     engine: str = "local",
     translate_fn=None,
+    rewrite: bool = False,
 ) -> dict[str, str]:
     originals = [key for key in data if key not in SKIP]
-    keys = pending_keys(data, originals)
+    changed = local_qwen.normalize_mapping(data)
+    originals = [key for key in data if key not in SKIP]
+    line_sources = cjk_wrap.load_line_sources(dest.parent)
+    keys = pending_keys(
+        data, originals, rewrite=rewrite, line_sources=line_sources
+    )
+    filled: list[str] = []
+    for key in list(changed) + list(keys):
+        if key not in filled:
+            filled.append(key)
+        cleaned = local_qwen.repair_ocr_bang(key)
+        if cleaned not in filled:
+            filled.append(cleaned)
+    for key in originals:
+        cleaned = local_qwen.repair_ocr_bang(key)
+        if cleaned in filled and key not in filled:
+            filled.append(key)
     dest.parent.mkdir(parents=True, exist_ok=True)
     (dest.parent / "filled_keys.json").write_text(
-        json.dumps(keys, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(filled, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    using_default = translate_fn is None
+    model_name = local_qwen.LOCAL_MODEL
+    glossary = local_qwen.name_glossary(data)
+    if using_default and engine == "local":
+        model_name = local_qwen.fill_local_model()
+        if local_qwen.is_galtransl_model(model_name):
+            glossary = local_qwen.galtransl_glossary(data)
+    kind = "rewrite" if rewrite else "empty OCR strings"
     if translate_fn is None:
         if engine == "local":
             ok, detail = local_qwen.probe()
@@ -93,23 +174,27 @@ def translate_mapping(
                 )
             chunk = local_qwen.CHUNK
             print(
-                f"translate {len(keys)}/{len(data)} empty OCR strings engine=local model={local_qwen.LOCAL_MODEL}"
+                f"translate {len(keys)}/{len(data)} {kind} engine=local model={model_name}"
             )
         else:
             chunk = translate_direct.CHUNK
-            print(f"translate {len(keys)}/{len(data)} empty OCR strings engine=mt")
+            print(f"translate {len(keys)}/{len(data)} {kind} engine=mt")
 
         def translate_fn(batch: list[str]) -> list[str]:
-            return _translate_batch(batch, engine=engine)
+            return _translate_batch(
+                batch, engine=engine, retry=False, glossary=glossary
+            )
     else:
         chunk = local_qwen.CHUNK
-        print(f"translate {len(keys)}/{len(data)} empty OCR strings engine={engine}")
+        print(f"translate {len(keys)}/{len(data)} {kind} engine={engine}")
 
     total = len(keys)
+    sent = 0
     local_qwen.emit("phase", "fill", done=0, total=total, message=f"填字 {total}")
 
     def run_batch(batch: list[str]) -> None:
-        queries = [local_qwen.repair_ocr_bang(item) for item in batch]
+        nonlocal sent
+        queries = [cjk_wrap.fill_query(item, line_sources) for item in batch]
         last_exc: Exception | None = None
         out: list[str] | None = None
         for attempt in range(4):
@@ -132,27 +217,47 @@ def translate_mapping(
                     preview = one.replace("\n", " ")[:40]
                     print(f"skip {type(one_exc).__name__}: {preview}")
                     out.append("")
-        for src_text, dst_text in zip(batch, out):
-            local_qwen.store_translation(data, src_text, dst_text)
+        for src_text, dst_text, query in zip(batch, out, queries):
+            local_qwen.store_translation(
+                data, src_text, cjk_wrap.keep_or_force_breaks(query, dst_text)
+            )
         dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        accepted = total - len(pending_keys(data, originals))
+        sent += len(batch)
+        if rewrite:
+            accepted = min(total, sent)
+        else:
+            accepted = total - len(
+                pending_keys(
+                    data, originals, rewrite=False, line_sources=line_sources
+                )
+            )
         print(f"progress {accepted}/{total}")
         local_qwen.emit(
             "progress", "fill", done=max(0, accepted), total=total, message=f"{accepted}/{total}"
         )
 
-    for i in range(0, len(keys), chunk):
-        run_batch(keys[i : i + chunk])
+    for batch in _iter_batches(keys, chunk, line_sources):
+        run_batch(batch)
+    if using_default:
+        def translate_fn(batch: list[str]) -> list[str]:
+            return _translate_batch(
+                batch, engine=engine, retry=True, glossary=glossary
+            )
     for round_i in range(2):
-        leftover = pending_keys(data, originals)
+        leftover = pending_keys(
+            data, originals, rewrite=False, line_sources=line_sources
+        )
         if not leftover:
             break
         print(f"retry untranslated round {round_i + 2}: {len(leftover)}")
         for one in leftover:
             run_batch([one])
 
+    dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     filled = sum(1 for key in originals if local_qwen.translation_ok(key, data.get(key, "")))
-    leftover = pending_keys(data, originals)
+    leftover = pending_keys(
+        data, originals, rewrite=False, line_sources=line_sources
+    )
     print(f"done filled={filled} leftover={len(leftover)} total={len(originals)} -> {dest}")
     local_qwen.emit(
         "done",
@@ -173,6 +278,7 @@ def translate_mapping(
 def main() -> int:
     argv = list(sys.argv[1:])
     argv, jsonl = local_qwen.take_flag(argv, "--progress-jsonl")
+    argv, rewrite = local_qwen.take_flag(argv, "--rewrite")
     local_qwen.enable_progress(jsonl)
     engine = "local"
     if "--mt" in argv:
@@ -182,10 +288,17 @@ def main() -> int:
         engine = "local"
         argv = [a for a in argv if a != "--local"]
     if len(argv) < 1:
-        print("usage: fill_ocr_local.py [--mt] [--progress-jsonl] <translations.json | work-folder>", file=sys.stderr)
+        print(
+            "usage: fill_ocr_local.py [--mt] [--rewrite] [--progress-jsonl] "
+            "<translations.json | work-folder>",
+            file=sys.stderr,
+        )
         return 2
     target = Path(argv[0])
     if target.is_dir():
+        rc = bubble_recall_local.launch_with_mit(target)
+        if rc not in (0, None):
+            print(f"bubble-recall exit {rc}", file=sys.stderr)
         data, dest = collect_from_dir(target)
     elif target.is_file():
         data = load_mapping(target)
@@ -193,7 +306,7 @@ def main() -> int:
     else:
         print(f"not found: {target}", file=sys.stderr)
         return 1
-    translate_mapping(data, dest, engine=engine)
+    translate_mapping(data, dest, engine=engine, rewrite=rewrite)
     return 0
 
 

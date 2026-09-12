@@ -144,6 +144,33 @@ public sealed record ModelProfileCatalog(int SchemaVersion, string DefaultId, IR
             ?? throw new InvalidOperationException($"不存在文本模型档案：{id}");
     }
 
+    public TextModelProfile? FindHanhuaFillProfile(string? selectedId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(selectedId))
+        {
+            var selected = Profiles.FirstOrDefault(profile =>
+                string.Equals(profile.Id, selectedId, StringComparison.Ordinal)
+                || string.Equals(profile.Service.ModelAlias, selectedId, StringComparison.Ordinal));
+            if (selected is not null)
+                return selected;
+        }
+        foreach (var profile in Profiles)
+        {
+            if (LooksLikeHanhuaFill(profile.Id)
+                || LooksLikeHanhuaFill(profile.DisplayName)
+                || LooksLikeHanhuaFill(profile.Service.ModelAlias))
+                return profile;
+        }
+        return null;
+    }
+
+    private static bool LooksLikeHanhuaFill(string? value)
+    {
+        var text = value ?? "";
+        return text.Contains("galtransl", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("sakura", StringComparison.OrdinalIgnoreCase);
+    }
+
     public ModelProfileCatalog Replace(TextModelProfile updated)
     {
         var index = Profiles.ToList().FindIndex(profile => string.Equals(profile.Id, updated.Id, StringComparison.Ordinal));

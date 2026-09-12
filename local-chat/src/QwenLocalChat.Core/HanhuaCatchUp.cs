@@ -22,6 +22,25 @@ public static class HanhuaCatchUp
             .OrderByDescending(job => job.UpdatedUtc)
             .FirstOrDefault();
 
+    public static bool SameSource(string? left, string? right)
+        => !string.IsNullOrWhiteSpace(left)
+            && string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+
+    public static bool ShouldPromptInsteadOfFreshStart(
+        HanhuaKind kind,
+        string sourcePath,
+        HanhuaJob? currentJob,
+        IEnumerable<HanhuaJob> jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+        if (kind != HanhuaKind.Image || string.IsNullOrWhiteSpace(sourcePath))
+            return false;
+        if (currentJob is { CanResume: true, Kind: HanhuaKind.Image }
+            && SameSource(currentJob.SourcePath, sourcePath))
+            return false;
+        return Latest(jobs.Where(job => SameSource(job.SourcePath, sourcePath))) is not null;
+    }
+
     public static IReadOnlyList<string> ListImageFiles(string folder)
     {
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))

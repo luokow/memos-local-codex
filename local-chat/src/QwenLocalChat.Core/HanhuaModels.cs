@@ -39,6 +39,7 @@ public enum HanhuaGpuNeed
 {
     None,
     Qwen,
+    GalTransl,
     Mit,
 }
 

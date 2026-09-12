@@ -30,9 +30,13 @@ def collect_mapping(root: Path) -> dict[str, str]:
             if isinstance(row, dict) and row.get("text"):
                 src = str(row["text"])
                 if src not in SKIP:
+                    cleaned = local_qwen.repair_ocr_bang(src)
                     mapping.setdefault(src, "")
+                    mapping.setdefault(cleaned, "")
             elif isinstance(row, str) and row not in SKIP:
+                cleaned = local_qwen.repair_ocr_bang(row)
                 mapping.setdefault(row, "")
+                mapping.setdefault(cleaned, "")
     return mapping
 
 
@@ -69,10 +73,18 @@ def merge_mapping(existing: dict[str, str], incoming: dict[str, str]) -> dict[st
 
 def mark_empty_ocr(pages: list[Path], dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps([{"skip": True}], ensure_ascii=False)
     for img in pages:
         path = dest / f"{img.stem}_ocr.json"
-        if not path.is_file():
-            path.write_text("[]", encoding="utf-8")
+        path.write_text(payload, encoding="utf-8")
+
+
+def aggressive_ocr_config() -> Path | None:
+    candidates = (
+        Path(__file__).resolve().parent.parent / "mit_ocr_retry.json",
+        Path(r"D:\grok\c108_work\config.json"),
+    )
+    return next((p for p in candidates if p.is_file()), None)
 
 
 def retry_missing_ocr(
@@ -135,6 +147,7 @@ def mit_ocr_command(
         str(typeset_in),
         "-o",
         str(dump),
+        *local_qwen.mit_dict_args(),
     ]
 
 
@@ -188,6 +201,9 @@ def main() -> int:
         message=f"抽字 {len(missing) if missing_only else len(copied)} 张",
     )
     if missing_only and not missing:
+        import bubble_recall_local
+
+        bubble_recall_local.launch_with_mit(work)
         print("ocr missing-only: no missing pages")
         local_qwen.emit(
             "done", "ocr", done=0, total=0, output=str(work), message="没有缺页"
@@ -215,17 +231,24 @@ def main() -> int:
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     rc = 0
+    ocr_dirs = [typeset_in, dump, sidecar]
     if missing_only:
-        retry_missing_ocr(
-            missing,
-            work=work,
-            mit_py=mit_py,
-            font=font,
-            cfg=cfg,
-            mit_root=mit_root,
-            dump=dump,
-            env=env,
-        )
+        no_file = [
+            img
+            for img in missing
+            if not any((folder / f"{img.stem}_ocr.json").is_file() for folder in ocr_dirs)
+        ]
+        if no_file:
+            retry_missing_ocr(
+                no_file,
+                work=work,
+                mit_py=mit_py,
+                font=font,
+                cfg=cfg,
+                mit_root=mit_root,
+                dump=dump,
+                env=env,
+            )
     else:
         cmd = mit_ocr_command(mit_py, font, cfg, typeset_in, dump)
         print("ocr", typeset_in, "->", dump)
@@ -254,18 +277,36 @@ def main() -> int:
             )
 
     still = local_qwen.missing_ocr_pages(copied, [typeset_in, dump, sidecar])
+    retry_cfg = aggressive_ocr_config() or cfg
+    if still:
+        print("ocr-retry-aggressive", retry_cfg, "pages", len(still))
+        retry_missing_ocr(
+            still,
+            work=work,
+            mit_py=mit_py,
+            font=font,
+            cfg=retry_cfg,
+            mit_root=mit_root,
+            dump=dump,
+            env=env,
+        )
+        still = local_qwen.missing_ocr_pages(copied, [typeset_in, dump, sidecar])
     if still:
         preview = ", ".join(p.stem for p in still[:8])
         extra = f" 等 {len(still)} 页" if len(still) > 8 else ""
         local_qwen.log(f"抽字后仍无文字 {len(still)} 页: {preview}{extra}")
         mark_empty_ocr(still, dump)
 
+    import bubble_recall_local
+
+    bubble_recall_local.launch_with_mit(work)
     mapping = collect_mapping(typeset_in)
     mapping.update({k: v for k, v in collect_mapping(dump).items() if k not in mapping})
     mapping.update({k: v for k, v in collect_mapping(sidecar).items() if k not in mapping})
     local_qwen.isolate_image_folder(typeset_in, sidecar)
     if missing_only:
         mapping = merge_mapping(load_translations(trans), mapping)
+    local_qwen.normalize_mapping(mapping)
     failed = ocr_failed_message(rc, len(mapping))
     if failed:
         local_qwen.log(failed)

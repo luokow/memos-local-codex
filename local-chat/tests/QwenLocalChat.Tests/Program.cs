@@ -204,17 +204,25 @@ var tests = new (string Name, Action Body)[]
     ("video-media-settings-cap-at-node-max", VideoMediaSettingsCapAtNodeMax),
     ("video-workflow-parameters-override-sampler-inputs", VideoWorkflowParametersOverrideSamplerInputs),
     ("hanhua-settings-default-and-roundtrip", HanhuaSettingsDefaultAndRoundTrip),
+    ("settings-section-follows-workspace", SettingsSectionFollowsWorkspace),
     ("hanhua-game-command-local-and-aliyun", HanhuaGameCommandLocalAndAliyun),
+    ("hanhua-unity-command-routes-without-rewriting-rm", HanhuaUnityCommandRoutesWithoutRewritingRm),
     ("hanhua-image-commands-order-and-engine", HanhuaImageCommandsOrderAndEngine),
     ("hanhua-catch-up-reuses-work-and-skips-ocr-when-complete", HanhuaCatchUpReusesWorkAndSkipsOcrWhenComplete),
     ("hanhua-catch-up-commands-pass-missing-and-changed-flags", HanhuaCatchUpCommandsPassMissingAndChangedFlags),
+    ("hanhua-start-prompts-when-same-source-already-succeeded", HanhuaStartPromptsWhenSameSourceAlreadySucceeded),
     ("hanhua-progress-parses-jsonl-and-plain-lines", HanhuaProgressParsesJsonlAndPlainLines),
     ("hanhua-progress-formats-elapsed-and-remaining-like-video", HanhuaProgressFormatsElapsedAndRemainingLikeVideo),
+    ("hanhua-progress-keeps-book-total-when-retry-batch-is-smaller", HanhuaProgressKeepsBookTotalWhenRetryBatchIsSmaller),
+    ("hanhua-progress-spans-phases-so-fill-complete-is-not-done", HanhuaProgressSpansPhasesSoFillCompleteIsNotDone),
+    ("hanhua-begin-phase-clears-fill-counters-before-typeset", HanhuaBeginPhaseClearsFillCountersBeforeTypeset),
+    ("hanhua-catch-up-progress-uses-actual-phase-list", HanhuaCatchUpProgressUsesActualPhaseList),
     ("hanhua-progress-waits-before-eta-and-uses-page-units", HanhuaProgressWaitsBeforeEtaAndUsesPageUnits),
     ("hanhua-progress-finished-and-cancelling-keep-elapsed", HanhuaProgressFinishedAndCancellingKeepElapsed),
     ("hanhua-error-summarizes-mit-quit-and-next-action", HanhuaErrorSummarizesMitQuitAndNextAction),
     ("hanhua-arbitration-blocks-overlapping-jobs", HanhuaArbitrationBlocksOverlappingJobs),
     ("hanhua-gpu-need-depends-on-engine-and-phase", HanhuaGpuNeedDependsOnEngineAndPhase),
+    ("hanhua-fill-uses-galtransl-profile-and-env", HanhuaFillUsesGaltranslProfileAndEnv),
     ("hanhua-job-store-keeps-active-and-caps-history", HanhuaJobStoreKeepsActiveAndCapsHistory),
     ("hanhua-process-host-reads-progress-and-logs", HanhuaProcessHostReadsProgressAndLogs),
     ("hanhua-interrupt-does-not-change-startup-model", HanhuaInterruptDoesNotChangeStartupModel),
@@ -2126,9 +2134,10 @@ static void SettingsDefaultsAndLegacyMigration()
         Equal(true, migrated.UseMemos, "legacy privacy choices must survive settings migration");
         Equal(false, migrated.SaveChatLogs, "legacy logging choice must survive settings migration");
         Equal(true, migrated.EnforceTextVideoModelExclusivity, "legacy settings must keep safe text-video model exclusivity by default");
-        Equal(LocalChatSettings.DefaultHanhuaPackRoot, migrated.HanhuaPackRoot, "legacy settings must receive the machine default hanhua pack path");
-        Equal(LocalChatSettings.DefaultHanhuaPythonExe, migrated.HanhuaPythonExe, "legacy settings must receive the machine default hanhua python path");
-        Equal(LocalChatSettings.DefaultHanhuaMitRoot, migrated.HanhuaMitRoot, "legacy settings must receive the machine default hanhua MIT path");
+        Equal("", migrated.HanhuaPackRoot, "legacy settings must not invent a machine hanhua pack path");
+        Equal("", migrated.HanhuaPythonExe, "legacy settings must not invent a machine python path");
+        Equal("", migrated.HanhuaMitRoot, "legacy settings must not invent a machine MIT path");
+        Equal("", migrated.HanhuaFillProfileId, "legacy settings must not invent a hanhua fill profile");
         Equal(HanhuaEngineCodec.Local, migrated.HanhuaEngine, "legacy settings must default hanhua to local Qwen");
         Equal(4_096, migrated.MaxOutputTokens, "missing generation settings must receive current defaults");
     Equal(0, migrated.ContextSize, "chat settings loading must leave model context to the shared config overlay");
@@ -3953,6 +3962,7 @@ static LocalChatSettings HanhuaFixtureSettings(string root)
     var pack = Path.Combine(root, "pack");
     Directory.CreateDirectory(Path.Combine(pack, "tools"));
     File.WriteAllText(Path.Combine(pack, "tools", "one_click_rm.py"), "#");
+    File.WriteAllText(Path.Combine(pack, "tools", "one_click_unity.py"), "#");
     File.WriteAllText(Path.Combine(pack, "tools", "ocr_extract_local.py"), "#");
     File.WriteAllText(Path.Combine(pack, "tools", "fill_ocr_local.py"), "#");
     File.WriteAllText(Path.Combine(pack, "tools", "typeset_ocr_local.py"), "#");
@@ -3965,15 +3975,28 @@ static LocalChatSettings HanhuaFixtureSettings(string root)
         HanhuaPackRoot = pack,
         HanhuaPythonExe = python,
         HanhuaMitRoot = mit,
+        HanhuaFillProfileId = "sakura-galtransl-7b-v3-7",
     };
+}
+
+static void SettingsSectionFollowsWorkspace()
+{
+    Equal(SettingsSectionKind.Hanhua, SettingsSectionKind.ForWorkspace(videoSelected: false, hanhuaSelected: true), "hanhua page settings must open the hanhua section, not text");
+    Equal(SettingsSectionKind.Video, SettingsSectionKind.ForWorkspace(videoSelected: true, hanhuaSelected: false), "video page settings stay on video");
+    Equal(SettingsSectionKind.Text, SettingsSectionKind.ForWorkspace(videoSelected: false, hanhuaSelected: false), "chat page settings stay on text");
+    Equal(SettingsSectionKind.Hanhua, SettingsSectionKind.Normalize("hanhua"), "hanhua section id must round-trip");
+    Equal(SettingsSectionKind.Text, SettingsSectionKind.Normalize("nope"), "unknown section falls back to text");
 }
 
 static void HanhuaSettingsDefaultAndRoundTrip()
 {
-    Equal(LocalChatSettings.DefaultHanhuaPackRoot, LocalChatSettings.SafeDefaults.HanhuaPackRoot, "hanhua pack path must default to the machine pack");
-    Equal(LocalChatSettings.DefaultHanhuaPythonExe, LocalChatSettings.SafeDefaults.HanhuaPythonExe, "hanhua python path must default to the machine python");
-    Equal(LocalChatSettings.DefaultHanhuaMitRoot, LocalChatSettings.SafeDefaults.HanhuaMitRoot, "hanhua MIT path must default to the machine MIT root");
+    Equal("", LocalChatSettings.SafeDefaults.HanhuaPackRoot, "hanhua pack path must not bake a machine folder");
+    Equal("", LocalChatSettings.SafeDefaults.HanhuaPythonExe, "hanhua python path must not bake this user");
+    Equal("", LocalChatSettings.SafeDefaults.HanhuaMitRoot, "hanhua MIT path must not bake a machine folder");
+    Equal("", LocalChatSettings.SafeDefaults.HanhuaFillProfileId, "hanhua fill profile must come from settings, not a constant");
     Equal(HanhuaEngineCodec.Local, LocalChatSettings.SafeDefaults.HanhuaEngine, "hanhua engine must default to local Qwen");
+    Equal(false, LocalChatSettings.SafeDefaults.HanhuaPackRoot.Contains(@"D:\grok", StringComparison.OrdinalIgnoreCase), "defaults must not mention D:\\grok");
+    Equal(false, LocalChatSettings.SafeDefaults.HanhuaPythonExe.Contains("Users\\kow", StringComparison.OrdinalIgnoreCase), "defaults must not mention this Windows user");
 
     var directory = Path.Combine(Path.GetTempPath(), $"hanhua-settings-{Guid.NewGuid():N}");
     Directory.CreateDirectory(directory);
@@ -3985,6 +4008,7 @@ static void HanhuaSettingsDefaultAndRoundTrip()
             HanhuaPackRoot = @"D:\pack",
             HanhuaPythonExe = @"D:\python.exe",
             HanhuaMitRoot = @"D:\mit",
+            HanhuaFillProfileId = "my-fill",
             HanhuaEngine = "aliyun",
         };
         new SettingsStore(path).Save(settings);
@@ -3992,19 +4016,22 @@ static void HanhuaSettingsDefaultAndRoundTrip()
         Equal(@"D:\pack", reloaded.HanhuaPackRoot, "hanhua pack path must round-trip");
         Equal(@"D:\python.exe", reloaded.HanhuaPythonExe, "hanhua python path must round-trip");
         Equal(@"D:\mit", reloaded.HanhuaMitRoot, "hanhua MIT path must round-trip");
+        Equal("my-fill", reloaded.HanhuaFillProfileId, "hanhua fill profile must round-trip");
         Equal("aliyun", reloaded.HanhuaEngine, "hanhua engine must round-trip");
         Equal(true, reloaded.EnforceTextVideoModelExclusivity, "saving hanhua paths must not disable exclusivity");
 
         File.WriteAllText(path, "{\"use_memos\":false,\"hanhua_engine\":\"nope\"}");
         var normalized = new SettingsStore(path).Load().Settings.Normalized();
         Equal(HanhuaEngineCodec.Local, normalized.HanhuaEngine, "unknown hanhua engine must fall back to local");
-        Equal(LocalChatSettings.DefaultHanhuaPackRoot, normalized.HanhuaPackRoot, "missing pack path must fall back to default");
+        Equal("", normalized.HanhuaPackRoot, "missing pack path must stay empty so the user can fill settings");
+        Equal("", normalized.HanhuaFillProfileId, "missing fill profile must stay empty");
 
-        File.WriteAllText(path, "{\"hanhua_pack_root\":\"\",\"hanhua_python_exe\":\"  \",\"hanhua_mit_root\":\"\"}");
-        var blank = new SettingsStore(path).Load().Settings;
-        Equal(LocalChatSettings.DefaultHanhuaPackRoot, blank.HanhuaPackRoot, "blank pack path must fall back to default");
-        Equal(LocalChatSettings.DefaultHanhuaPythonExe, blank.HanhuaPythonExe, "blank python path must fall back to default");
-        Equal(LocalChatSettings.DefaultHanhuaMitRoot, blank.HanhuaMitRoot, "blank MIT path must fall back to default");
+        File.WriteAllText(path, "{\"hanhua_pack_root\":\"\",\"hanhua_python_exe\":\"  \",\"hanhua_mit_root\":\"\",\"hanhua_fill_profile_id\":\"  \"}");
+        var blank = new SettingsStore(path).Load().Settings.Normalized();
+        Equal("", blank.HanhuaPackRoot, "blank pack path must stay empty");
+        Equal("", blank.HanhuaPythonExe, "blank python path must stay empty");
+        Equal("", blank.HanhuaMitRoot, "blank MIT path must stay empty");
+        Equal("", blank.HanhuaFillProfileId, "blank fill profile must stay empty");
     }
     finally { Directory.Delete(directory, recursive: true); }
 }
@@ -4021,6 +4048,11 @@ static void HanhuaGameCommandLocalAndAliyun()
         var local = HanhuaCommand.Game(settings, HanhuaEngine.LocalQwen, game);
         Equal(true, local.Arguments.Contains("--local"), "local game command must pass --local");
         Equal(true, local.Arguments.Contains("--progress-jsonl"), "local game command must pass progress jsonl");
+        Equal("sakura-galtransl-7b-v3-7", local.Environment[HanhuaCommand.LocalModelEnv], "local game fill model comes from settings");
+        var custom = HanhuaCommand.Game(settings with { HanhuaFillProfileId = "my-fill" }, HanhuaEngine.LocalQwen, game);
+        Equal("my-fill", custom.Environment[HanhuaCommand.LocalModelEnv], "custom hanhua fill profile must flow into HANHUA_LOCAL_MODEL");
+        var unset = HanhuaCommand.Game(settings with { HanhuaFillProfileId = "" }, HanhuaEngine.LocalQwen, game);
+        Equal(false, unset.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "empty fill profile must not pin a hardcoded model");
         Equal(false, local.Environment.Keys.Any(key => key.Contains("key", StringComparison.OrdinalIgnoreCase)
             || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
             || key.Contains("token", StringComparison.OrdinalIgnoreCase)), "hanhua env must not carry secrets");
@@ -4028,7 +4060,63 @@ static void HanhuaGameCommandLocalAndAliyun()
         var cloud = HanhuaCommand.Game(settings, HanhuaEngine.Aliyun, game);
         Equal(false, cloud.Arguments.Contains("--local"), "aliyun game command must omit --local");
         Equal(true, cloud.Arguments.Contains("--progress-jsonl"), "aliyun game command still reports progress");
+        Equal(false, cloud.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "aliyun game does not pin a local model");
         Equal(null, HanhuaCommand.Validate(settings, HanhuaKind.Game), "fixture paths must validate for game jobs");
+    }
+    finally { Directory.Delete(root, recursive: true); }
+}
+
+static void HanhuaUnityCommandRoutesWithoutRewritingRm()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"hanhua-unity-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        var settings = HanhuaFixtureSettings(root);
+        var rm = Path.Combine(root, "rm");
+        Directory.CreateDirectory(rm);
+        File.WriteAllText(Path.Combine(rm, "Game.exe"), "mz");
+        var localRm = HanhuaCommand.Game(settings, HanhuaEngine.LocalQwen, rm);
+        Equal(true, localRm.Arguments.Any(a => a.EndsWith("one_click_rm.py", StringComparison.OrdinalIgnoreCase)), "RPG Maker still uses one_click_rm.py");
+        Equal(true, localRm.Arguments.Contains("--local"), "RPG Maker local still passes --local");
+        Equal(false, localRm.Arguments.Any(a => a.EndsWith("one_click_unity.py", StringComparison.OrdinalIgnoreCase)), "RPG Maker must not switch to Unity script");
+
+        var unity = Path.Combine(root, "unity");
+        Directory.CreateDirectory(unity);
+        File.WriteAllBytes(Path.Combine(unity, "GameAssembly.dll"), [1]);
+        Directory.CreateDirectory(Path.Combine(unity, "Demo_Data"));
+        File.WriteAllBytes(Path.Combine(unity, "Demo.exe"), [1]);
+        Equal(true, HanhuaCommand.LooksLikeUnity(unity), "GameAssembly.dll marks Unity");
+        Equal(false, HanhuaCommand.LooksLikeUnity(rm), "Game.exe alone is not Unity");
+        Equal(false, HanhuaCommand.UnityHasDump(unity), "fresh Unity has no dump");
+
+        var install = HanhuaCommand.Unity(settings, HanhuaEngine.LocalQwen, unity, fill: false);
+        Equal(true, install.Arguments.Any(a => a.EndsWith("one_click_unity.py", StringComparison.OrdinalIgnoreCase)), "Unity install uses one_click_unity.py");
+        Equal(true, install.Arguments.Contains("--progress-jsonl"), "Unity install reports progress");
+        Equal(false, install.Arguments.Contains("--fill"), "install does not fill");
+        Equal(false, install.Arguments.Contains("--local"), "Unity does not use RM --local");
+        Equal(false, install.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "install does not pin GalTransl");
+
+        var fill = HanhuaCommand.Unity(settings, HanhuaEngine.LocalQwen, unity, fill: true);
+        Equal(true, fill.Arguments.Contains("--fill"), "fill pass sets --fill");
+        Equal("sakura-galtransl-7b-v3-7", fill.Environment[HanhuaCommand.LocalModelEnv], "Unity fill model comes from settings");
+        var customFill = HanhuaCommand.Unity(settings with { HanhuaFillProfileId = "my-fill" }, HanhuaEngine.LocalQwen, unity, fill: true);
+        Equal("my-fill", customFill.Environment[HanhuaCommand.LocalModelEnv], "Unity fill must honor the selected fill profile");
+        Equal(false, fill.Environment.Keys.Any(key => key.Contains("key", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("token", StringComparison.OrdinalIgnoreCase)), "Unity env must not carry secrets");
+
+        var cloud = HanhuaCommand.Unity(settings, HanhuaEngine.Aliyun, unity, fill: false);
+        Equal(false, cloud.Arguments.Contains("--fill"), "aliyun Unity only installs");
+        Equal(false, cloud.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "aliyun Unity does not pin a local model");
+
+        Equal(HanhuaGpuNeed.None, HanhuaCommand.GpuNeed(HanhuaKind.Game, HanhuaEngine.LocalQwen, HanhuaPhase.Copy), "Unity install does not start GalTransl");
+        Equal(HanhuaGpuNeed.GalTransl, HanhuaCommand.GpuNeed(HanhuaKind.Game, HanhuaEngine.LocalQwen, HanhuaPhase.Translate), "Unity fill still uses GalTransl");
+        Equal(2, HanhuaCommand.UnityPhases.Count, "Unity is install then fill");
+        Equal(
+            "选 RPG Maker（Game.exe）或 Unity 游戏目录，点开始汉化即可。不用点右上角启动。",
+            HanhuaProgressStatus.EmptyHint(HanhuaKind.Game),
+            "empty hint must mention Unity");
     }
     finally { Directory.Delete(root, recursive: true); }
 }
@@ -4055,6 +4143,10 @@ static void HanhuaImageCommandsOrderAndEngine()
         Equal(settings.HanhuaMitRoot, ocr.Environment[HanhuaCommand.MitRootEnv], "OCR must receive HANHUA_MIT_ROOT");
         Equal(settings.HanhuaMitRoot, typeset.Environment[HanhuaCommand.MitRootEnv], "typeset must receive HANHUA_MIT_ROOT");
         Equal(false, fillLocal.Environment.ContainsKey(HanhuaCommand.MitRootEnv), "fill does not need MIT");
+        Equal("sakura-galtransl-7b-v3-7", fillLocal.Environment[HanhuaCommand.LocalModelEnv], "local fill model comes from settings");
+        var customFill = HanhuaCommand.ImageFill(settings with { HanhuaFillProfileId = "my-fill" }, HanhuaEngine.LocalQwen, work);
+        Equal("my-fill", customFill.Environment[HanhuaCommand.LocalModelEnv], "image fill must honor the selected fill profile");
+        Equal(false, fillCloud.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "aliyun fill does not pin a local model");
     }
     finally { Directory.Delete(root, recursive: true); }
 }
@@ -4100,6 +4192,53 @@ static void HanhuaCatchUpReusesWorkAndSkipsOcrWhenComplete()
         Equal(false, HanhuaCatchUp.CanCatchUp(game), "game jobs do not use image catch-up");
         Equal(false, HanhuaCatchUp.CanCatchUp(ready with { Status = HanhuaJobStatus.Running }), "active jobs cannot catch up");
         Equal(false, HanhuaCatchUp.CanCatchUp(ready with { WorkPath = Path.Combine(root, "missing") }), "missing work folder cannot catch up");
+    }
+    finally { Directory.Delete(root, recursive: true); }
+}
+
+static void HanhuaStartPromptsWhenSameSourceAlreadySucceeded()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"hanhua-dup-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        var source = Path.Combine(root, "src");
+        var work = Path.Combine(root, "work");
+        var other = Path.Combine(root, "other");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(work);
+        Directory.CreateDirectory(other);
+        File.WriteAllText(Path.Combine(work, "translations.json"), "{}");
+        var done = new HanhuaJob(
+            "done-img", HanhuaKind.Image, HanhuaEngine.LocalQwen, HanhuaPhase.Typeset,
+            HanhuaJobStatus.Succeeded, source, work, Path.Combine(work, "out"),
+            1, 1, "ok", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+        Equal(true, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
+            HanhuaKind.Image, source, done, [done]),
+            "succeeded same-source start must ask continue vs fresh");
+        Equal(true, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
+            HanhuaKind.Image, source, done with { Status = HanhuaJobStatus.Failed }, [done]),
+            "a failed job with translations still offers catch-up instead of silently redoing");
+
+        var interrupted = done with { Status = HanhuaJobStatus.Interrupted, Phase = HanhuaPhase.Fill };
+        Equal(false, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
+            HanhuaKind.Image, source, interrupted, [interrupted]),
+            "interrupted same-source start resumes without the duplicate prompt");
+
+        Equal(false, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
+            HanhuaKind.Image, other, done, [done]),
+            "a different folder is a new book");
+        Equal(false, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
+            HanhuaKind.Game, source, done, [done]),
+            "game jobs do not use the image duplicate prompt");
+        Equal(false, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
+            HanhuaKind.Image, source, done, [done with { WorkPath = Path.Combine(root, "missing") }]),
+            "missing work folder cannot be continued");
+        Equal(
+            "这个目录已经汉化过。接着上次只补未译对白和缺页；全新会整本重抽。",
+            HanhuaProgressStatus.DuplicateStartPrompt,
+            "prompt copy names both continue and fresh");
     }
     finally { Directory.Delete(root, recursive: true); }
 }
@@ -4150,11 +4289,79 @@ static void HanhuaProgressFormatsElapsedAndRemainingLikeVideo()
     var live = HanhuaProgressStatus.FromJob(SampleHanhuaJob(HanhuaPhase.Fill, 3, 9), TimeSpan.FromMinutes(10));
     Equal(true, live.StatusText.Contains("第 2/3 步 正在填字", StringComparison.Ordinal), "image fill is step 2 of 3");
     Equal(true, live.StatusText.Contains("已用时 00:10:00", StringComparison.Ordinal), "elapsed clock matches video");
-    Equal(true, live.StatusText.Contains("剩余约 00:20:00", StringComparison.Ordinal), "linear remaining from done/total");
+    Equal(true, live.StatusText.Contains("剩余约 00:12:30", StringComparison.Ordinal), "remaining uses whole-job fraction, not just this step");
     Equal(true, live.StatusText.Contains("3/9 句", StringComparison.Ordinal), "fill counts sentences");
-    Equal(false, live.StatusText.Contains("33%", StringComparison.Ordinal), "percent stays next to the bar");
-    Equal("33%", live.PercentText, "bar percent is a whole number");
+    Equal(false, live.StatusText.Contains("44%", StringComparison.Ordinal), "percent stays next to the bar");
+    Equal("44%", live.PercentText, "bar percent is whole-job: (1 + 3/9) / 3");
     Equal(true, live.Determinate, "known totals make a determinate bar");
+}
+
+static void HanhuaProgressKeepsBookTotalWhenRetryBatchIsSmaller()
+{
+    var merged = HanhuaProgressStatus.MergePhaseCounters(225, 253, 10, 28);
+    Equal(235, merged.Done, "retry 10/28 continues from the 225 already finished pages");
+    Equal(253, merged.Total, "retry batch must not shrink the book total to 28");
+
+    var finished = HanhuaProgressStatus.MergePhaseCounters(225, 253, 28, 28);
+    Equal(253, finished.Done, "retry 28/28 is the last pages of the book");
+    Equal(253, finished.Total, "finished retry still reports the book size");
+
+    var first = HanhuaProgressStatus.MergePhaseCounters(0, 0, 0, 253);
+    Equal(0, first.Done, "first OCR emit starts at zero");
+    Equal(253, first.Total, "first OCR emit sets the book total");
+}
+
+static void HanhuaBeginPhaseClearsFillCountersBeforeTypeset()
+{
+    var fillDone = SampleHanhuaJob(HanhuaPhase.Fill, 1555, 1555);
+    var fillLive = HanhuaProgressStatus.FromJob(fillDone, TimeSpan.FromMinutes(50));
+    Equal("67%", fillLive.PercentText, "fill 1555/1555 is still only step 2 of 3");
+
+    var stale = fillDone with { Phase = HanhuaPhase.Typeset };
+    var staleLive = HanhuaProgressStatus.FromJob(stale, TimeSpan.FromMinutes(62));
+    Equal("100%", staleLive.PercentText, "keeping fill counters after switching to typeset reads as finished");
+
+    var begun = HanhuaProgressStatus.BeginPhase(fillDone, HanhuaPhase.Typeset);
+    Equal(HanhuaPhase.Typeset, begun.Phase, "begin phase switches to typeset");
+    Equal(0, begun.Done, "typeset must not inherit fill sentence done");
+    Equal(0, begun.Total, "typeset must not inherit fill sentence total");
+    var live = HanhuaProgressStatus.FromJob(begun, TimeSpan.FromMinutes(62));
+    Equal("67%", live.PercentText, "typeset start after fill stays at 2/3 until pages tick");
+    Equal(true, live.StatusText.Contains("第 3/3 步 正在嵌字", StringComparison.Ordinal), "footer names typeset");
+    Equal(false, live.StatusText.Contains("1555/1555", StringComparison.Ordinal), "fill sentence counters must not appear on typeset");
+}
+
+static void HanhuaProgressSpansPhasesSoFillCompleteIsNotDone()
+{
+    var fillDone = HanhuaProgressStatus.FromJob(SampleHanhuaJob(HanhuaPhase.Fill, 9, 9), TimeSpan.FromMinutes(30));
+    Equal("67%", fillDone.PercentText, "fill finishing is 2/3 of the image job, not 100%");
+    Equal(true, fillDone.StatusText.Contains("剩余约 00:15:00", StringComparison.Ordinal), "one step left keeps a remaining clock");
+    Equal(false, fillDone.PercentText == "100%", "fill complete must not look finished");
+
+    var typesetStart = HanhuaProgressStatus.FromJob(SampleHanhuaJob(HanhuaPhase.Typeset, 0, 99), TimeSpan.FromMinutes(30));
+    Equal("67%", typesetStart.PercentText, "typeset 0/99 continues from fill's 2/3");
+    Equal(true, typesetStart.StatusText.Contains("0/99 页", StringComparison.Ordinal), "typeset still shows page units");
+    Equal(true, typesetStart.StatusText.Contains("剩余约 00:15:00", StringComparison.Ordinal), "typeset start must not show remaining 00:00:00");
+    Equal(true, typesetStart.Determinate, "known page total keeps a determinate bar");
+
+    var typesetMid = HanhuaProgressStatus.FromJob(SampleHanhuaJob(HanhuaPhase.Typeset, 33, 99), TimeSpan.FromMinutes(40));
+    Equal("78%", typesetMid.PercentText, "typeset 33/99 is (2 + 1/3) / 3");
+    Equal(true, typesetMid.StatusText.Contains("剩余约 00:11:25", StringComparison.Ordinal), "remaining follows whole-job fraction");
+}
+
+static void HanhuaCatchUpProgressUsesActualPhaseList()
+{
+    HanhuaPhase[] catchUp = [HanhuaPhase.Fill, HanhuaPhase.Typeset];
+    var fillDone = HanhuaProgressStatus.FromJob(
+        SampleHanhuaJob(HanhuaPhase.Fill, 9, 9), TimeSpan.FromMinutes(10), catchUp);
+    Equal(true, fillDone.StatusText.Contains("第 1/2 步 正在填字", StringComparison.Ordinal), "catch-up without OCR is two steps");
+    Equal("50%", fillDone.PercentText, "catch-up fill complete is half the job");
+    Equal(true, fillDone.StatusText.Contains("剩余约 00:10:00", StringComparison.Ordinal), "remaining covers the typeset step");
+
+    var typeset = HanhuaProgressStatus.FromJob(
+        SampleHanhuaJob(HanhuaPhase.Typeset, 0, 99), TimeSpan.FromMinutes(10), catchUp);
+    Equal("50%", typeset.PercentText, "catch-up typeset starts at half, not 100%");
+    Equal(true, typeset.StatusText.Contains("第 2/2 步 正在嵌字", StringComparison.Ordinal), "typeset is the last catch-up step");
 }
 
 static void HanhuaProgressWaitsBeforeEtaAndUsesPageUnits()
@@ -4193,6 +4400,10 @@ static void HanhuaErrorSummarizesMitQuitAndNextAction()
     Equal(false, summary.Contains("4294967295", StringComparison.Ordinal), "raw MIT codes stay out of the status line");
     var failed = HanhuaErrorPresentation.DisplayMessage(
         HanhuaKind.Image, HanhuaPhase.Ocr, HanhuaJobStatus.Failed, "mit_exit=4294967295");
+    var unityIdle = HanhuaErrorPresentation.DisplayMessage(
+        HanhuaKind.Game, HanhuaPhase.Translate, HanhuaJobStatus.Succeeded, "汉化完成。", 0, 0);
+    Equal(true, unityIdle.Contains("不会给正在开着的游戏改字", StringComparison.Ordinal), "Unity 0-fill must not claim the game is translated");
+    Equal(false, unityIdle.Contains("汉化完成", StringComparison.Ordinal), "Unity 0-fill must not say 汉化完成");
     Equal(true, failed.Contains("不用点右上角启动", StringComparison.Ordinal), "failed jobs tell the user not to press Start");
     Equal(true, failed.Contains("点开始汉化可重试", StringComparison.Ordinal), "failed jobs name the retry action");
     Equal(
@@ -4245,12 +4456,39 @@ static void HanhuaArbitrationBlocksOverlappingJobs()
 
 static void HanhuaGpuNeedDependsOnEngineAndPhase()
 {
-    Equal(HanhuaGpuNeed.Qwen, HanhuaCommand.GpuNeed(HanhuaKind.Game, HanhuaEngine.LocalQwen, HanhuaPhase.Translate), "local game needs Qwen");
+    Equal(HanhuaGpuNeed.None, HanhuaCommand.GpuNeed(HanhuaKind.Game, HanhuaEngine.LocalQwen, HanhuaPhase.Copy), "Unity/RM copy does not start a model");
+    Equal(HanhuaGpuNeed.GalTransl, HanhuaCommand.GpuNeed(HanhuaKind.Game, HanhuaEngine.LocalQwen, HanhuaPhase.Translate), "local game uses GalTransl, not chat Qwen");
     Equal(HanhuaGpuNeed.None, HanhuaCommand.GpuNeed(HanhuaKind.Game, HanhuaEngine.Aliyun, HanhuaPhase.Translate), "aliyun game does not start Qwen");
     Equal(HanhuaGpuNeed.Mit, HanhuaCommand.GpuNeed(HanhuaKind.Image, HanhuaEngine.LocalQwen, HanhuaPhase.Ocr), "OCR always needs MIT GPU");
     Equal(HanhuaGpuNeed.Mit, HanhuaCommand.GpuNeed(HanhuaKind.Image, HanhuaEngine.Aliyun, HanhuaPhase.Typeset), "typeset always needs MIT GPU");
-    Equal(HanhuaGpuNeed.Qwen, HanhuaCommand.GpuNeed(HanhuaKind.Image, HanhuaEngine.LocalQwen, HanhuaPhase.Fill), "local fill needs Qwen");
+    Equal(HanhuaGpuNeed.GalTransl, HanhuaCommand.GpuNeed(HanhuaKind.Image, HanhuaEngine.LocalQwen, HanhuaPhase.Fill), "local image fill uses GalTransl, not chat Qwen");
     Equal(HanhuaGpuNeed.None, HanhuaCommand.GpuNeed(HanhuaKind.Image, HanhuaEngine.Aliyun, HanhuaPhase.Fill), "aliyun fill does not start Qwen");
+}
+
+static void HanhuaFillUsesGaltranslProfileAndEnv()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"hanhua-fill-profile-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(Path.Combine(root, "runtime"));
+    try
+    {
+        File.WriteAllText(
+            Path.Combine(root, "runtime", "model-profiles.json"),
+            "{\"schema_version\":1,\"default_id\":\"qwen-local\",\"profiles\":["
+            + "{\"id\":\"qwen-local\",\"display_name\":\"Qwen Local\",\"adapter\":\"llama.cpp-openai\",\"service\":{\"schema_version\":1,\"bind_host\":\"127.0.0.1\",\"port\":18135,\"server_executable\":\"llama/bin/llama-server.exe\",\"model_path\":\"models/qwen.gguf\",\"model_alias\":\"qwen3.5:9b-uncensored-local\",\"context_size\":4096,\"gpu_layers\":1,\"parallel_slots\":1,\"reasoning_enabled\":false,\"use_jinja\":true,\"startup_timeout_seconds\":30,\"auto_start_on_demand\":true}},"
+            + "{\"id\":\"sakura-galtransl-7b-v3-7\",\"display_name\":\"Sakura-Galtransl-7B-v3.7\",\"adapter\":\"llama.cpp-openai\",\"service\":{\"schema_version\":1,\"bind_host\":\"127.0.0.1\",\"port\":18135,\"server_executable\":\"llama/bin/llama-server.exe\",\"model_path\":\"models/sakura.gguf\",\"model_alias\":\"sakura-galtransl-7b-v3-7\",\"context_size\":4096,\"gpu_layers\":1,\"parallel_slots\":1,\"reasoning_enabled\":false,\"use_jinja\":true,\"startup_timeout_seconds\":30,\"auto_start_on_demand\":true}}"
+            + "]}");
+        var catalog = new ModelProfileCatalogStore(root, Path.Combine(root, "runtime", "model-profiles.json")).Load();
+        Equal("qwen-local", catalog.DefaultId, "chat default stays qwen-local");
+        var fill = catalog.FindHanhuaFillProfile();
+        Equal("sakura-galtransl-7b-v3-7", fill?.Id, "image fill must pick the GalTransl profile");
+        Equal("sakura-galtransl-7b-v3-7", fill?.Service.ModelAlias, "image fill alias must match HANHUA_LOCAL_MODEL");
+        var chosen = catalog.FindHanhuaFillProfile("qwen-local");
+        Equal("qwen-local", chosen?.Id, "settings fill profile id must win over GalTransl auto-detect");
+        var settings = HanhuaFixtureSettings(root);
+        var launch = HanhuaCommand.ImageFill(settings, HanhuaEngine.LocalQwen, Path.Combine(root, "work"), fill!.Service.ModelAlias);
+        Equal(fill.Service.ModelAlias, launch.Environment[HanhuaCommand.LocalModelEnv], "fill process must request GalTransl, not chat Qwen");
+    }
+    finally { Directory.Delete(root, recursive: true); }
 }
 
 static void HanhuaJobStoreKeepsActiveAndCapsHistory()

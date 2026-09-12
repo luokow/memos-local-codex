@@ -145,6 +145,27 @@ public static class StartupModelSelection
         => value is None or Video ? value : Text;
 }
 
+public static class SettingsSectionKind
+{
+    public const string Text = "text";
+    public const string Video = "video";
+    public const string Hanhua = "hanhua";
+
+    public static string ForWorkspace(bool videoSelected, bool hanhuaSelected)
+        => hanhuaSelected ? Hanhua : videoSelected ? Video : Text;
+
+    public static string Normalize(string? value)
+        => value is Video or Hanhua ? value : Text;
+}
+
+public static class HanhuaSettingsPathKind
+{
+    public const string PackRoot = "pack";
+    public const string PythonExe = "python";
+    public const string MitRoot = "mit";
+    public const string FillModel = "fill";
+}
+
 public sealed record StartupModelPlan(
     string Mode,
     bool StartTextModel,
@@ -164,9 +185,6 @@ public sealed record LocalChatSettings
 {
     public const string DefaultModelAlias = "local-model";
     public const string DefaultModelPath = "";
-    public const string DefaultHanhuaPackRoot = @"D:\grok\内嵌汉化";
-    public const string DefaultHanhuaPythonExe = @"C:\Users\kow\AppData\Local\Programs\Python\Python312\python.exe";
-    public const string DefaultHanhuaMitRoot = @"D:\grok\tools\manga-image-translator";
 
     // Neutral sampling by default so free-form quality stays natural.
     // Stronger anti-rep (freq/DRY/…) is opt-in via settings when long loops reappear.
@@ -320,13 +338,17 @@ public sealed record LocalChatSettings
     public ChatAttachmentPolicy ChatAttachments { get; init; } = ChatAttachmentPolicy.SafeDefaults;
 
     [JsonPropertyName("hanhua_pack_root")]
-    public string HanhuaPackRoot { get; init; } = DefaultHanhuaPackRoot;
+    public string HanhuaPackRoot { get; init; } = "";
 
     [JsonPropertyName("hanhua_python_exe")]
-    public string HanhuaPythonExe { get; init; } = DefaultHanhuaPythonExe;
+    public string HanhuaPythonExe { get; init; } = "";
 
     [JsonPropertyName("hanhua_mit_root")]
-    public string HanhuaMitRoot { get; init; } = DefaultHanhuaMitRoot;
+    public string HanhuaMitRoot { get; init; } = "";
+
+    /// <summary>Text-profile id used for GalTransl fill. Empty lets the catalog pick a GalTransl profile.</summary>
+    [JsonPropertyName("hanhua_fill_profile_id")]
+    public string HanhuaFillProfileId { get; init; } = "";
 
     /// <summary><c>local</c> or <c>aliyun</c>. Unknown values normalize to local.</summary>
     [JsonPropertyName("hanhua_engine")]
@@ -369,14 +391,15 @@ public sealed record LocalChatSettings
             VideoGeneration = (VideoGeneration ?? VideoGenerationSettings.SafeDefaults).Normalized(),
             VideoPromptPhrases = (VideoPromptPhrases ?? VideoPromptTemplatePhrases.OfficialDefaults).WithDefaults(),
             ChatAttachments = (ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults).Normalized(),
-            HanhuaPackRoot = CoalesceHanhuaPath(HanhuaPackRoot, DefaultHanhuaPackRoot),
-            HanhuaPythonExe = CoalesceHanhuaPath(HanhuaPythonExe, DefaultHanhuaPythonExe),
-            HanhuaMitRoot = CoalesceHanhuaPath(HanhuaMitRoot, DefaultHanhuaMitRoot),
+            HanhuaPackRoot = CoalesceHanhuaPath(HanhuaPackRoot),
+            HanhuaPythonExe = CoalesceHanhuaPath(HanhuaPythonExe),
+            HanhuaMitRoot = CoalesceHanhuaPath(HanhuaMitRoot),
+            HanhuaFillProfileId = CoalesceHanhuaPath(HanhuaFillProfileId),
             HanhuaEngine = HanhuaEngineCodec.ToJson(HanhuaEngineCodec.Parse(HanhuaEngine)),
         };
 
-    public static string CoalesceHanhuaPath(string? value, string fallback)
-        => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+    public static string CoalesceHanhuaPath(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "" : value.Trim();
 
     public bool IsSameAs(LocalChatSettings other)
     {
@@ -423,6 +446,7 @@ public sealed record LocalChatSettings
                && string.Equals(left.HanhuaPackRoot, right.HanhuaPackRoot, StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.HanhuaPythonExe, right.HanhuaPythonExe, StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.HanhuaMitRoot, right.HanhuaMitRoot, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(left.HanhuaFillProfileId, right.HanhuaFillProfileId, StringComparison.Ordinal)
                && string.Equals(left.HanhuaEngine, right.HanhuaEngine, StringComparison.Ordinal);
     }
 
@@ -433,6 +457,7 @@ public sealed record LocalChatSettings
         return !string.Equals(left.HanhuaPackRoot, right.HanhuaPackRoot, StringComparison.OrdinalIgnoreCase)
                || !string.Equals(left.HanhuaPythonExe, right.HanhuaPythonExe, StringComparison.OrdinalIgnoreCase)
                || !string.Equals(left.HanhuaMitRoot, right.HanhuaMitRoot, StringComparison.OrdinalIgnoreCase)
+               || !string.Equals(left.HanhuaFillProfileId, right.HanhuaFillProfileId, StringComparison.Ordinal)
                || !string.Equals(left.HanhuaEngine, right.HanhuaEngine, StringComparison.Ordinal);
     }
 
@@ -675,9 +700,10 @@ public sealed class SettingsStore(string path)
                 VideoGeneration = settings.VideoGeneration ?? VideoGenerationSettings.SafeDefaults,
                 VideoPromptPhrases = (settings.VideoPromptPhrases ?? VideoPromptTemplatePhrases.OfficialDefaults).WithDefaults(),
                 ChatAttachments = settings.ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults,
-                HanhuaPackRoot = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPackRoot, LocalChatSettings.DefaultHanhuaPackRoot),
-                HanhuaPythonExe = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPythonExe, LocalChatSettings.DefaultHanhuaPythonExe),
-                HanhuaMitRoot = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaMitRoot, LocalChatSettings.DefaultHanhuaMitRoot),
+                HanhuaPackRoot = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPackRoot),
+                HanhuaPythonExe = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPythonExe),
+                HanhuaMitRoot = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaMitRoot),
+                HanhuaFillProfileId = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaFillProfileId),
             }, null, null);
         }
         catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)

@@ -45,6 +45,7 @@ public sealed partial class MainPage : Page
     private VideoModelProfileCatalog? _videoProfiles;
     private ConversationSessionStore? _sessionStore;
     private QwenServiceManager? _modelManager;
+    private QwenServiceManager? _hanhuaFillManager;
     private QwenChatClient? _chatClient;
     private MemosStdioClient? _memos;
     private MarkdownChatLog? _chatLog;
@@ -151,9 +152,10 @@ public sealed partial class MainPage : Page
         SettingsPanel.ReleaseTextModelRequested += async (_, _) => await ReleaseTextModelAsync();
         SettingsPanel.ReleaseVideoModelRequested += async (_, _) => await ReleaseVideoModelAsync();
         // Focus only after close animation finishes — focusing mid-slide causes UI thrash/jank.
-        VideoPanel.SettingsRequested += (_, _) => OpenSettings(videoSection: true);
+        VideoPanel.SettingsRequested += (_, _) => OpenSettings(SettingsSectionKind.Video);
         VideoPanel.ModelStatusChanged += UpdateVideoModelStatus;
-        HanhuaPanel.SettingsRequested += (_, _) => OpenSettings(videoSection: false);
+        HanhuaPanel.SettingsRequested += (_, _) => OpenSettings(SettingsSectionKind.Hanhua);
+        SettingsPanel.HanhuaPathPickRequested += SettingsPanel_HanhuaPathPickRequested;
         HanhuaPanel.GpuNeedChanged += HanhuaPanel_GpuNeedChanged;
         VideoPanel.ExpandedTextRequested += ShowVideoExpandedText;
         VideoPanel.SessionsChanged += (_, _) => RefreshVideoSessionPicker();
@@ -195,7 +197,8 @@ public sealed partial class MainPage : Page
                 PrepareForHanhuaGpuAsync,
                 PickHanhuaFolderAsync,
                 PersistHanhuaEngine,
-                _paths.LocalChatRoot);
+                _paths.LocalChatRoot,
+                () => _modelProfiles?.FindHanhuaFillProfile(_settings.HanhuaFillProfileId)?.Service.ModelAlias);
             if (modelConfigLoad.Migrated) _settingsStore.Save(_settings);
             _initializationStage = "创建模型客户端";
             CreateModelClients(_settings);
@@ -324,6 +327,7 @@ public sealed partial class MainPage : Page
         _memoryQueue.StateChanged -= MemoryQueue_StateChanged;
         SettingsPanel.SaveRequested -= SettingsPanel_SaveRequested;
         SettingsPanel.CloseRequested -= SettingsPanel_CloseRequested;
+        SettingsPanel.HanhuaPathPickRequested -= SettingsPanel_HanhuaPathPickRequested;
         foreach (var gen in _generations.Values.ToList())
         {
             try { gen.Cts.Cancel(); } catch { }
@@ -350,6 +354,17 @@ public sealed partial class MainPage : Page
         await HanhuaPanel.ShutdownAsync();
         await VideoPanel.ShutdownAsync(stopOwnedModel, detachRunningWork: true);
         _chatClient?.Dispose();
+        if (_hanhuaFillManager is not null)
+        {
+            try
+            {
+                if (stopOwnedModel)
+                    await _hanhuaFillManager.StopServiceAsync();
+            }
+            catch { /* best-effort stop; still release handles */ }
+            await _hanhuaFillManager.DisposeAsync();
+            _hanhuaFillManager = null;
+        }
         if (_modelManager is not null)
         {
             try
@@ -457,7 +472,9 @@ public sealed partial class MainPage : Page
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        OpenSettings(ModeSelector.SelectedItem == VideoModeItem);
+        OpenSettings(SettingsSectionKind.ForWorkspace(
+            ModeSelector.SelectedItem == VideoModeItem,
+            ModeSelector.SelectedItem == HanhuaModeItem));
     }
 
     private void PersistHanhuaEngine(HanhuaEngine engine)
@@ -476,6 +493,43 @@ public sealed partial class MainPage : Page
         return folder?.Path;
     }
 
+    private async void SettingsPanel_HanhuaPathPickRequested(object? sender, string kind)
+        => await PickHanhuaSettingsPathAsync(kind);
+
+    private async Task PickHanhuaSettingsPathAsync(string kind)
+    {
+        try
+        {
+            string? path = kind switch
+            {
+                HanhuaSettingsPathKind.PythonExe => await PickHanhuaFileAsync(".exe"),
+                HanhuaSettingsPathKind.FillModel => await PickHanhuaFileAsync(".gguf"),
+                HanhuaSettingsPathKind.MitRoot => await PickHanhuaFolderAsync("选择 manga-image-translator 目录"),
+                _ => await PickHanhuaFolderAsync("选择汉化工具包目录"),
+            };
+            if (string.IsNullOrWhiteSpace(path)) return;
+            SettingsPanel.SetHanhuaPath(kind, path);
+        }
+        catch (Exception error)
+        {
+            SetNotice($"选择汉化路径失败：{error.Message}", ErrorText);
+        }
+    }
+
+    private async Task<string?> PickHanhuaFileAsync(string extension)
+    {
+        var picker = new FileOpenPicker
+        {
+            SuggestedStartLocation = PickerLocationId.ComputerFolder,
+            ViewMode = PickerViewMode.List,
+        };
+        picker.FileTypeFilter.Add(extension);
+        if (App.WindowHandle != 0)
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        var file = await picker.PickSingleFileAsync();
+        return file?.Path;
+    }
+
     private void HanhuaPanel_GpuNeedChanged(object? sender, HanhuaGpuNeedChangedEventArgs e)
     {
         if (!string.IsNullOrWhiteSpace(e.StatusText))
@@ -487,9 +541,14 @@ public sealed partial class MainPage : Page
 
     private async Task PrepareForHanhuaGpuAsync(HanhuaGpuNeed need, CancellationToken cancellationToken)
     {
-        if (need == HanhuaGpuNeed.None) return;
+        if (need == HanhuaGpuNeed.None)
+        {
+            await StopHanhuaFillModelAsync(cancellationToken);
+            return;
+        }
         if (need == HanhuaGpuNeed.Qwen)
         {
+            await StopHanhuaFillModelAsync(cancellationToken);
             if (_settings.EnforceTextVideoModelExclusivity)
                 await VideoPanel.ReleaseModelAsync(cancellationToken);
             if (_modelManager is null) throw new InvalidOperationException("文本模型尚未初始化。");
@@ -499,7 +558,15 @@ public sealed partial class MainPage : Page
             UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
             return;
         }
+        if (need == HanhuaGpuNeed.GalTransl)
+        {
+            if (_settings.EnforceTextVideoModelExclusivity)
+                await VideoPanel.ReleaseModelAsync(cancellationToken);
+            await EnsureHanhuaFillModelAsync(cancellationToken);
+            return;
+        }
 
+        await StopHanhuaFillModelAsync(cancellationToken);
         if (_modelManager is not null)
             await _modelManager.StopServiceAsync(cancellationToken);
         await VideoPanel.ReleaseModelAsync(cancellationToken);
@@ -508,17 +575,71 @@ public sealed partial class MainPage : Page
         UpdateTextModelStatus(ModelLifecycleState.Released);
     }
 
-    private void OpenSettings(bool videoSection)
+    private async Task EnsureHanhuaFillModelAsync(CancellationToken cancellationToken)
+    {
+        var fillProfile = _modelProfiles?.FindHanhuaFillProfile(_settings.HanhuaFillProfileId);
+        if (fillProfile is null)
+        {
+            if (_modelManager is null) throw new InvalidOperationException("文本模型尚未初始化。");
+            await _modelManager.EnsureAvailableAsync(cancellationToken);
+            if (!await _modelManager.IsHealthyAsync(cancellationToken))
+                throw new InvalidOperationException("本机 Qwen 没能自动启动，填字无法继续。");
+            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+            return;
+        }
+        if (_paths is null) throw new InvalidOperationException("文本模型尚未初始化。");
+        if (_modelConfig is not null
+            && string.Equals(_modelConfig.ModelPath, fillProfile.Service.ModelPath, StringComparison.OrdinalIgnoreCase)
+            && _modelManager is not null)
+        {
+            await _modelManager.EnsureAvailableAsync(cancellationToken);
+            if (!await _modelManager.IsHealthyAsync(cancellationToken))
+                throw new InvalidOperationException("汉化填字模型没能自动启动。");
+            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+            return;
+        }
+        if (_modelManager is not null)
+            await _modelManager.StopServiceAsync(cancellationToken);
+        if (_hanhuaFillManager is not null && await _hanhuaFillManager.IsHealthyAsync(cancellationToken))
+        {
+            UpdateTextModelStatus(_hanhuaFillManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+            return;
+        }
+        await StopHanhuaFillModelAsync(cancellationToken);
+        var options = fillProfile.Service.ToLocalModelOptions(
+            _paths.ProjectRoot,
+            Path.Combine(_paths.DiagnosticsRoot, "llama-hanhua-fill.log"),
+            _paths.ModelStartLockFile,
+            _paths.ModelLifecycleLogFile);
+        _hanhuaFillManager = new QwenServiceManager(options, new WindowsModelProcessLauncher());
+        await _hanhuaFillManager.EnsureAvailableAsync(cancellationToken);
+        if (!await _hanhuaFillManager.IsHealthyAsync(cancellationToken))
+            throw new InvalidOperationException("汉化填字模型没能自动启动。");
+        UpdateTextModelStatus(_hanhuaFillManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+    }
+
+    private async Task StopHanhuaFillModelAsync(CancellationToken cancellationToken)
+    {
+        if (_hanhuaFillManager is null) return;
+        try { await _hanhuaFillManager.StopServiceAsync(cancellationToken); }
+        catch { /* fill model is best-effort; MIT still needs the GPU */ }
+        try { await _hanhuaFillManager.DisposeAsync(); }
+        catch { /* already stopped */ }
+        _hanhuaFillManager = null;
+    }
+
+    private void OpenSettings(string section)
     {
         if (_modelProfiles is null || _videoProfiles is null) return;
-        _settingsOpenedForVideo = videoSection;
-        SettingsPanel.Open(_settings, _modelProfiles, _videoProfiles, videoSection);
+        var kind = SettingsSectionKind.Normalize(section);
+        _settingsOpenedForVideo = kind == SettingsSectionKind.Video;
+        SettingsPanel.Open(_settings, _modelProfiles, _videoProfiles, kind);
     }
 
     private async void SettingsPanel_SaveRequested(object? sender, SettingsSaveRequestedEventArgs e)
     {
         DismissSettingsPanel();
-        await ApplyRuntimeSettingsAsync(e.Settings, e.EditedVideoProfile);
+        await ApplyRuntimeSettingsAsync(e.Settings, e.EditedVideoProfile, e.EditedHanhuaFillProfile);
     }
 
     private void SettingsPanel_CloseRequested(object? sender, EventArgs e)
@@ -530,7 +651,10 @@ public sealed partial class MainPage : Page
         SettingsPanel.Close();
     }
 
-    private async Task ApplyRuntimeSettingsAsync(LocalChatSettings candidate, VideoModelProfile editedVideoProfile)
+    private async Task ApplyRuntimeSettingsAsync(
+        LocalChatSettings candidate,
+        VideoModelProfile editedVideoProfile,
+        TextModelProfile? editedHanhuaFillProfile = null)
     {
         if (_settingsStore is null) return;
         if (VideoPanel.IsGenerating)
@@ -557,6 +681,9 @@ public sealed partial class MainPage : Page
             if (videoErrors.Count > 0) throw new ArgumentException(string.Join("；", videoErrors), nameof(candidate));
             var candidateModelConfig = candidate.ApplyToModelService(selectedText.Service);
             var candidateProfiles = _modelProfiles.Replace(selectedText with { Service = candidateModelConfig });
+            if (editedHanhuaFillProfile is not null
+                && !string.Equals(editedHanhuaFillProfile.Id, selectedText.Id, StringComparison.Ordinal))
+                candidateProfiles = candidateProfiles.AddOrReplace(editedHanhuaFillProfile);
             _modelProfileStore.Save(candidateProfiles);
             _modelConfigStore.Save(candidateModelConfig);
             _videoProfileStore!.Save(candidateVideoProfiles);

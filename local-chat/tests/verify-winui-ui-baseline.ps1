@@ -517,6 +517,24 @@ if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='ComposerStar
 if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='CatchUpHanhuaButton']", $hanhuaNs)) {
     throw 'Hanhua footer must expose a one-click catch-up button for untranslated image pages.'
 }
+if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:Border[@x:Name='DuplicateConfirmBar']", $hanhuaNs)) {
+    throw 'Hanhua composer must ask continue vs fresh before redoing a finished book.'
+}
+if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='DuplicateContinueButton']", $hanhuaNs)) {
+    throw 'The duplicate-book prompt must expose continue-last.'
+}
+if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='DuplicateFreshButton']", $hanhuaNs)) {
+    throw 'The duplicate-book prompt must expose a fresh start.'
+}
+if ($null -eq $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='DuplicateCancelButton']", $hanhuaNs)) {
+    throw 'The duplicate-book prompt must be dismissible.'
+}
+if ($hanhuaPanelSource -match 'ContentDialog') {
+    throw 'Hanhua must not use ContentDialog for the duplicate-book prompt.'
+}
+if ($hanhuaPanelSource -notmatch 'ShouldPromptInsteadOfFreshStart') {
+    throw 'Starting a finished image folder must ask before creating a new work id.'
+}
 if ($null -ne $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='StartHanhuaButton']", $hanhuaNs)) {
     throw 'Hanhua footer must not repeat the start button already on the composer.'
 }
@@ -597,7 +615,7 @@ $settingsContentScroll = $settingsPanel.SelectSingleNode("//xaml:ScrollViewer[@x
 if ($null -eq $settingsContentScroll) { throw 'Settings content must expose a named scroll owner so each section can reopen at the top.' }
 $videoProfileExpander = $settingsPanel.SelectSingleNode("//xaml:Expander[@x:Name='VideoProfileParametersExpander']", $settingsNs)
 Require-Equal 'Down' $videoProfileExpander.ExpandDirection 'Video profile parameters must expand downward inside the settings drawer.'
-if ($settingsPanelSource -notmatch 'SettingsContentScrollViewer\.ChangeView' -or $settingsPanelSource -notmatch 'VideoProfileParametersExpander\.IsExpanded\s*=\s*videoSection') {
+if ($settingsPanelSource -notmatch 'SettingsContentScrollViewer\.ChangeView' -or $settingsPanelSource -notmatch 'VideoProfileParametersExpander\.IsExpanded\s*=\s*kind == SettingsSectionKind\.Video') {
     throw 'Opening or switching settings must return to the top and reveal video profile capability editing.'
 }
 foreach ($automationId in @('TextModelProfileSetting', 'VideoModelProfileSetting')) {
@@ -606,13 +624,27 @@ foreach ($automationId in @('TextModelProfileSetting', 'VideoModelProfileSetting
     Require-Equal 'ComboBox' $node.LocalName "Model profile selector '$automationId' must keep native keyboard and accessibility behavior."
 }
 if ($null -eq $settingsPanel.SelectSingleNode("//xaml:SelectorBar[@x:Name='SettingsSectionSelector']", $settingsNs)) {
-    throw 'Settings drawer must expose text and video model sections.'
+    throw 'Settings drawer must expose text, video, and hanhua model sections.'
 }
 if ($null -eq $settingsPanel.SelectSingleNode("//xaml:StackPanel[@x:Name='TextSettingsSection']", $settingsNs)) {
     throw 'Settings drawer must isolate text settings in a selectable section.'
 }
-if ($settingsPanelSource -notmatch 'SettingsSectionSelector_SelectionChanged' -or $settingsPanelSource -notmatch 'VideoSettingsSection\.Visibility') {
-    throw 'Settings selector must actually toggle text and video section visibility.'
+if ($null -eq $settingsPanel.SelectSingleNode("//xaml:StackPanel[@x:Name='HanhuaSettingsSection']", $settingsNs)) {
+    throw 'Settings drawer must isolate hanhua settings in a selectable section.'
+}
+if ($null -eq $settingsPanel.SelectSingleNode("//xaml:SelectorBarItem[@x:Name='HanhuaSettingsSectionItem']", $settingsNs)) {
+    throw 'Settings selector must include a hanhua item.'
+}
+if ($settingsPanelSource -notmatch 'SettingsSectionSelector_SelectionChanged' -or $settingsPanelSource -notmatch 'VideoSettingsSection\.Visibility' -or $settingsPanelSource -notmatch 'HanhuaSettingsSection\.Visibility') {
+    throw 'Settings selector must actually toggle text, video, and hanhua section visibility.'
+}
+if ($mainPageSource -notmatch 'OpenSettings\(SettingsSectionKind\.Hanhua\)') {
+    throw 'The hanhua page settings button must open the hanhua settings section directly.'
+}
+foreach ($automationId in @('HanhuaPackRootPickButton', 'HanhuaPythonExePickButton', 'HanhuaMitRootPickButton', 'HanhuaFillModelPickButton', 'HanhuaFillModelPathSetting')) {
+    if ($null -eq $settingsPanel.SelectSingleNode("//*[@AutomationProperties.AutomationId='$automationId']", $settingsNs)) {
+        throw "Hanhua settings path picker is missing: $automationId"
+    }
 }
 if ($settingsPanelSource -notmatch 'VideoGeneration\s*=\s*new VideoGenerationSettings') {
     throw 'Video settings fields must participate in save and dirty checks.'
