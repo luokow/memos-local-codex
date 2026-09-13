@@ -32,7 +32,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\create-desktop-short
 | MemOS + MCP | Codex 记忆工具 | 否 |
 | ComfyUI + MiniMax H3 | 视频页 | 否 |
 
-聊天和视频/嵌字在 8GB 显存上互斥。不要用 Ollama `11434`，不要用 MT 适配 `18765`。
+不要用 Ollama `11434`，不要用 MT 适配 `18765`。聊天、填字、视频默认互斥，可在设置里关。
 
 ## 模型（摘要）
 
@@ -43,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\create-desktop-short
 | 聊天 | [HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive](https://huggingface.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive) | `Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf` |
 | 填字 | [SakuraLLM/Sakura-GalTransl-7B-v3.7](https://huggingface.co/SakuraLLM/Sakura-GalTransl-7B-v3.7)（非商用） | `Sakura-Galtransl-7B-v3.7.gguf` |
 
-8GB 聊天档案建议：上下文 32768、GPU 层 99、并发 1、思考关、Jinja 开。填字档案建议上下文 8192。客户端启动时还会加上 flash-attn / q8 KV / ngram-mod 等 8GB 默认参数。
+示例档案在 `runtime/model-profiles.example.json`。上下文、GPU 层、并发按本机显存在设置里改，保存后重启模型。
 
 ## 配置示例
 

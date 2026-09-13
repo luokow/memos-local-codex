@@ -164,7 +164,7 @@ Unity（同一「游戏文本」下拉，自动识别 `UnityPlayer.dll` / `GameA
 
 1. 抽字：停 Qwen 与视频，跑 `ocr_extract_local.py --progress-jsonl`（MIT `--prep-manual`，不带 `--save-text`），写出空译文表和 `typeset_in`。抽完后把 `*_ocr.json` / `*_translations.txt` 移到 `ocr_sidecars`，避免 MIT 把 sidecar 当图片打开。
 2. 填字：本机启动 Qwen 并做健康检查（loopback 禁用系统代理），跑 `fill_ocr_local.py --progress-jsonl`。阿里云不启停 Qwen，跑 `fill_ocr_local.py --mt --progress-jsonl`。已填且不等于原文的键跳过。
-3. 嵌字：再停 Qwen，跑 `typeset_ocr_local.py --progress-jsonl`。嵌字前再次隔离 sidecar。MIT 保持 translator=none，用环境变量指向已填译文表，不让 MIT 自己调模型（8GB 上不能在 OCR/擦字同时加载本机 Qwen）。
+3. 嵌字：再停 Qwen，跑 `typeset_ocr_local.py --progress-jsonl`。嵌字前再次隔离 sidecar。MIT 保持 translator=none，用环境变量指向已填译文表，不让 MIT 自己调模型（OCR/擦字时不要同时加载本机填字模型）。
 
 游戏任务与图片任务不能并行。图片三阶段是同一个任务，取消停在当前阶段；续跑从该阶段重来（填字跳过已填）。
 

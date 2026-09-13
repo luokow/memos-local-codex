@@ -16,12 +16,11 @@ GGUF 权重、`llama-server` 和运行数据不入库，必须按下面步骤放
 | 项 | 聊天可用 | 说明 |
 |---|---|---|
 | 系统 | Windows 11，SDK `10.0.26100` | WinUI 目标框架 `net9.0-windows10.0.26100.0` |
-| GPU | NVIDIA，CUDA 12，**显存 ≥ 8 GB** | 本仓库按 RTX 4070 Laptop 8GB 验证 |
-| 内存 | ≥ 16 GB | `llama-server` 会把 prompt cache 限制在 1024 MiB |
-| 磁盘 | 聊天约 6 GB；加填字约 12 GB | 不含 ComfyUI 视频 |
+| GPU | NVIDIA，CUDA 12 | 显存按你选的 GGUF 和上下文来；不够就在设置里降低 `context_size` / `parallel_slots`，或换更小量化 |
+| 磁盘 | 聊天 GGUF 约 5.3 GiB；加填字再约 5.8 GiB | 不含 ComfyUI 视频权重 |
 | 开发 | [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)、Windows 开发人员模式 | 用于 `deploy-winui.ps1` 注册 loose AppX |
 
-8GB 卡上 **聊天 XOR 填字 XOR 漫画 OCR/嵌字 XOR MiniMax H3 / ComfyUI**，不要双开。
+聊天、填字、漫画 OCR/嵌字、视频各自会占 GPU。设置里默认开启互斥，也可关掉。
 
 ## 2. 仓库里有什么、没有什么
 
@@ -102,7 +101,7 @@ llama\bin\ggml-cuda.dll
 | 放到 | `models\Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf` |
 | 档案 id | `qwen-local` |
 | API 别名 | `qwen3.5:9b-uncensored-local` |
-| 8GB 建议 | 上下文 32768，GPU 层 99，并发槽 1，思考关闭，Jinja 开启 |
+| 示例档案 | 见 `runtime/model-profiles.example.json`（上下文、GPU 层、并发可在设置里改） |
 
 下载示例：
 
@@ -112,11 +111,7 @@ curl.exe -L --fail --retry 5 -o models\Qwen3.5-9B-Uncensored-HauhauCS-Aggressive
 Get-FileHash models\Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf -Algorithm SHA256
 ```
 
-也可用 `huggingface-cli download`。校验必须与上表 SHA-256 一致。
-
-8GB 不要加载 `mmproj` 视觉编码器。Q6_K（约 6.9 GB）在 8GB 卡上过紧；本仓库默认 Q4_K_M。
-
-更大显存可以把 `runtime\model-profiles.json` 里 `qwen-local` 的 `context_size` / `parallel_slots` 调高，上限见客户端设置（上下文 32768、槽位 8）。改完后必须重启模型。
+也可用 `huggingface-cli download`。校验必须与上表 SHA-256 一致。同一 Hugging Face 仓库还有 Q6_K、Q8_0 等量化，换文件后改档案里的 `model_path`。聊天默认不加载 `mmproj`。上下文和并发在设置里改，保存后重启模型。
 
 ### 汉化填字（可选）
 
@@ -130,13 +125,12 @@ Get-FileHash models\Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf -Algor
 | 许可 | CC-BY-NC-SA-4.0，禁止商用 |
 | 放到 | `models\sakura-galtransl-7b-v3.7\Sakura-Galtransl-7B-v3.7.gguf` |
 | 档案 id | `sakura-galtransl-7b-v3-7` |
-| 8GB 建议 | 上下文 8192，并发槽 1 |
 
-6GB 档可改用同一仓库的 `Sakura-Galtransl-7B-v3.7-IQ4_XS.gguf`，并改档案里的 `model_path`。
+同一仓库还有更小的 `Sakura-Galtransl-7B-v3.7-IQ4_XS.gguf`，换文件后改 `model_path`。
 
 填字走 `http://127.0.0.1:18135/v1/chat/completions`。模型别名不可包含 `qwen-mt`（否则会走 MT 协议、剥掉 `system`）。不要起 `qwen_mt_proxy.py` / 端口 `18765`。
 
-### 视频（可选，另占整卡）
+### 视频（可选）
 
 聊天不依赖 ComfyUI。要开视频页才需要：
 
@@ -144,7 +138,7 @@ Get-FileHash models\Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf -Algor
 - MiniMax H3 工作流节点与权重（见 `runtime\workflows\minimax-h3-api.json` 里的文件名）
 - 把 `runtime\video-model-profiles.json` 里的 `comfyUiRoot` / `outputDirectory` 改成你的绝对路径（输出目录必须在 ComfyUI 根之内）
 
-8GB 上开始视频前客户端会停掉聊天模型。
+默认互斥开启时，开始视频会停掉当前聊天模型。
 
 ## 6. 构建并打开客户端
 
@@ -177,11 +171,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\create-desktop-short
 
 改 GGUF 路径、端口、上下文、并发后，在设置里保存并**重启模型**。也可以在「设置 → 文本模型」里选一个只含单个 `.gguf` 的目录，客户端会生成新档案。
 
-启动参数里客户端会加上 8GB 默认：`--flash-attn on`、`--cache-type-k/v q8_0`、`--cache-ram 1024`、`--fit-target 512`、`--spec-type ngram-mod`。并发大于 1 时再加 `--kv-unified`。
-
 ## 8. 可选功能
 
-**汉化页**（`hanhua/`）：在设置里填写汉化工具包目录和 Python 3.12。入口是「开始汉化」，不是右上角「启动」。Unity 开始汉化只装插件/预填已抽出的句子，不会改正在开着的游戏窗口。填字用 GalTransl 档案，填完应释放模型，避免和 OCR/嵌字抢 8GB。
+**汉化页**（`hanhua/`）：在设置里填写汉化工具包目录和 Python 3.12。入口是「开始汉化」，不是右上角「启动」。Unity 开始汉化只装插件/预填已抽出的句子，不会改正在开着的游戏窗口。填字用 GalTransl 档案。
 
 **MemOS / Codex MCP**：`npm install` 后见仓库根 README 的记忆工具一节。不是打开聊天客户端的前置条件。
 
@@ -192,7 +184,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\create-desktop-short
 | 找不到 `local-chat` 项目根 | 确认 `llama` 目录与 `local-chat` 同级 |
 | `unknown model architecture: qwen35` | 换更新的 llama.cpp CUDA 构建 |
 | 健康检查 502 / 连不上 18135 | 设 `NO_PROXY=127.0.0.1,localhost`，不要走系统代理 |
-| CUDA OOM | 停 ComfyUI / 第二个 llama；聊天与填字不要同时开 |
+| CUDA OOM | 停其它占 GPU 的进程；或在设置里降低上下文 / 并发，或换更小量化 |
 | 窗口能开但一发送就失败 | `model-service.json` 的 `model_path` 是否指向真实 GGUF；`llama-server.exe` 是否在 `llama\bin` |
 | 填字把 system 吃掉 | 别名含 `qwen-mt`，或误开了 18765 适配 |
 

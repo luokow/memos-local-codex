@@ -78,7 +78,7 @@ ComfyUI 节点：
 
 ## 5. Local AI 档案相对官方收了什么
 
-当前档案：`runtime/video-model-profiles.json` 里的 `minimax-h3`。面向 RTX 4070 Laptop **8 GB**。
+当前档案：`runtime/video-model-profiles.json` 里的 `minimax-h3`。下表是示例档案默认值，可在设置里改。
 
 | 项 | 官方 / 节点 | 本机默认 | 设置里能调到 |
 |---|---|---|---|
@@ -106,7 +106,7 @@ ComfyUI 节点：
 
 参考图尺寸：`match` 按生成像素面积缩小（更省）；`max` 用 2048 短边，身份更稳，更慢更吃显存。
 
-聊天页的 Qwen Local（llama.cpp）和视频页的 MiniMax H3 **互斥**：8 GB 上不能同时占显存。H3 里的 Qwen3-VL 只当视频编码器，没有聊天 API。
+聊天页的 Qwen Local（llama.cpp）和视频页的 MiniMax H3 默认互斥（设置里可关）。H3 里的 Qwen3-VL 只当视频编码器，没有聊天 API。
 
 ## 6. 「多模态」在本机意味着什么
 
@@ -129,7 +129,7 @@ ComfyUI 节点：
 
 ## 7. 本机建议工作点
 
-8 GB 上已经跑通、比较稳的起点：
+示例档案比较稳的起点：
 
 - 864×480、10 秒、24 fps、约 20 步
 - 参考图默认 4 张；需要时在设置里加到 9
