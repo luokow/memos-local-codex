@@ -1,6 +1,10 @@
 node_modules/
 runtime/*
 !runtime/model-service.example.json
+!runtime/model-profiles.example.json
+!runtime/video-model-profiles.example.json
+!runtime/workflows/
+!runtime/workflows/*.json
 artifacts/
 llama/
 ollama/

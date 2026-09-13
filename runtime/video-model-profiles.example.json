@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "default_id": "minimax-h3",
+  "profiles": [
+    {
+      "Id": "minimax-h3",
+      "DisplayName": "MiniMax H3",
+      "Adapter": "comfyui-workflow",
+      "Service": {
+        "bindHost": "127.0.0.1",
+        "port": 8188,
+        "comfyUiRoot": "C:\\ComfyUI",
+        "outputDirectory": "C:\\ComfyUI\\output",
+        "BaseUri": "http://127.0.0.1:8188/"
+      },
+      "WorkflowPath": "runtime/workflows/minimax-h3-api.json",
+      "RequiredNodeClasses": [
+        "MiniMaxH3ReferenceToVideo",
+        "MiniMaxH3ImageToVideo",
+        "LoadVideo",
+        "GetVideoComponents",
+        "LoadAudio"
+      ],
+      "Capabilities": {
+        "FramesPerSecond": 24,
+        "AlignmentMultiple": 17,
+        "AlignmentOffset": 5,
+        "MinimumDimension": 256,
+        "MaximumDimension": 1024,
+        "DimensionStep": 32,
+        "MaximumPixels": 414720,
+        "MinimumDurationSeconds": 5,
+        "MaximumDurationSeconds": 15,
+        "MinimumSteps": 10,
+        "MaximumSteps": 30
+      },
+      "InputMapping": {
+        "Prompt": { "NodeId": "5", "InputName": "prompt" },
+        "Width": { "NodeId": "5", "InputName": "width" },
+        "Height": { "NodeId": "5", "InputName": "height" },
+        "Frames": { "NodeId": "5", "InputName": "length" },
+        "Steps": { "NodeId": "7", "InputName": "steps" },
+        "Seed": { "NodeId": "7", "InputName": "seed" },
+        "Fps": { "NodeId": "12", "InputName": "fps" },
+        "OutputPrefix": { "NodeId": "13", "InputName": "filename_prefix" },
+        "Format": { "NodeId": "13", "InputName": "format" },
+        "Codec": { "NodeId": "13", "InputName": "codec" },
+        "Cfg": { "NodeId": "7", "InputName": "cfg" },
+        "SamplerName": { "NodeId": "7", "InputName": "sampler_name" },
+        "Scheduler": { "NodeId": "7", "InputName": "scheduler" },
+        "Denoise": { "NodeId": "7", "InputName": "denoise" },
+        "ShiftVideo": { "NodeId": "6", "InputName": "shift_video" },
+        "ShiftAudio": { "NodeId": "6", "InputName": "shift_audio" },
+        "NegativePrompt": { "NodeId": "9", "InputName": "text" }
+      },
+      "Media": {
+        "textToVideo": true,
+        "firstFrame": true,
+        "firstLastFrame": true,
+        "maxReferenceImages": 9,
+        "nodeMaxReferenceImages": 9,
+        "defaultRefImageSize": "match",
+        "maxReferenceVideos": 1,
+        "nodeMaxReferenceVideos": 3,
+        "maxReferenceAudios": 1,
+        "nodeMaxReferenceAudios": 3,
+        "defaultMode": "text"
+      },
+      "Workflow": {
+        "cfg": 1,
+        "samplerName": "euler",
+        "scheduler": "simple",
+        "denoise": 1,
+        "shiftVideo": 12,
+        "shiftAudio": 3,
+        "negativePrompt": ""
+      }
+    }
+  ]
+}

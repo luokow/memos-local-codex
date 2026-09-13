@@ -1,5 +1,7 @@
 # Local AI 本地客户端
 
+从零安装（llama.cpp、GGUF、配置、编译）：仓库根目录 [`docs/deploy-local-ai.md`](../docs/deploy-local-ai.md)。
+
 双击桌面的 `Local AI.lnk` 即可打开 WinUI 3 客户端。顶部可切换“聊天”和“视频”：聊天模型来自 `runtime\model-profiles.json`，视频模型来自 `runtime\video-model-profiles.json`。Qwen Local 和 MiniMax H3 是当前默认档案，不是写死的产品名称；所有请求只访问本机回环地址。
 
 ## 界面

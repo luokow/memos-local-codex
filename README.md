@@ -1,59 +1,78 @@
-# Codex 本地 MemOS
+# Local AI / memos-local-codex
 
-这套集成把记忆数据库、语义向量模型和 Qwen 本地大模型全部放在本机。运行时不需要 MemOS、OpenAI 或其他云端 API Key。源码以 MIT 开源；GGUF 权重、`llama-server` 二进制、MemOS 运行数据和 `package-static` 不入库，需在本机自行放置。
+Windows 本机客户端：用 [llama.cpp](https://github.com/ggml-org/llama.cpp) 在回环地址跑 GGUF，WinUI 里聊天；可选游戏汉化填字、MemOS 记忆和 MiniMax H3 视频。不需要 OpenAI / MemOS 云 Key。源码 MIT；**权重和 `llama-server` 二进制不入库**。
 
-## 各组件做什么
+别人克隆之后要能用，请按这份走完：
 
-- **MemOS 2.0.12**：保存对话轨迹，组织短期/长期/抽象记忆，并执行记忆演化。
-- **本地生成模型**：由 `runtime/model-service.json` 指定 GGUF、别名、上下文、GPU 层数、并发、思考模式和 Jinja 模板。MemOS 使用它完成记忆提取、归纳与评分。
-- **all-MiniLM-L6-v2**：把文本转换成 384 维向量，用来快速查找“意思相近但字面不同”的记忆。它不负责生成回答。
-- **MCP 适配器**：向 Codex 提供 `memos_recall`、`memos_remember`、`memos_health` 和 `memos_list_recent` 四个工具。
-- **汉化工具包**：`hanhua/` 是 Local AI 汉化页调用的 Python 脚本。不含游戏资源和第三方汉化软件。
-
-## 数据位置
-
-- MemOS 数据库：`D:\codex\experiments\memos-local-codex\runtime\data\memos.db`
-- 共享模型配置：`D:\codex\experiments\memos-local-codex\runtime\model-service.json`
-- 配置示例：`D:\codex\experiments\memos-local-codex\runtime\model-service.example.json`
-- 向量模型缓存：`D:\codex\experiments\memos-local-codex\runtime\transformers-cache`
-- 本地模型诊断日志：`D:\codex\experiments\memos-local-codex\runtime\logs\llama-server.log`
-
-MemOS 文件日志和专用 LLM 日志均已禁用；遥测与 MemOS Hub 已禁用。共享配置只允许回环地址，当前实例使用 `127.0.0.1:18135`。验收阶段产生的旧日志只含合成测试内容，不作为运行时依赖。
-
-## 共享模型服务
-
-Qwen Local 和 MemOS 读取同一份 `runtime/model-service.json`。两端启动前会重新读取配置，并通过 `runtime/locks/model-service-start.lock` 协调，避免并发启动多个模型进程。锁文件包含 PID、客户端身份和配置摘要；只有死 PID 且服务不健康时才会恢复残留锁。
-
-死锁回收使用同目录的 `.recovery` 原子守卫。守卫存在时，两端都会等待或复用已经健康的服务；死 PID 留下的守卫会按原始内容哈希生成 `.retired.<sha256>` 审计文件。Node 使用同卷硬链接和文件 ID 比较，C# 使用禁止覆盖的原子移动，随后再继续获取启动锁。`npm run accept:lock-cross-language` 会让 C# 与 Node 同时回收同一组遗留主锁和守卫，并验证只有一个启动所有者。
-
-`auto_start_on_demand` 控制 MemOS 的真实 `recall` / `remember` 调用能否在冷状态启动模型。`memos_health` 和 `memos_list_recent` 保持只读，不会启动模型。Qwen Local 设置页的“记忆调用按需启动模型”开关会更新该字段。
-
-模型启动、复用、停止和失败事件记录在 `runtime/logs/model-service-lifecycle.jsonl`。日志保存路径哈希和配置摘要，不记录提示词或记忆正文。
-
-## 使用
-
-不修改全局 Codex 配置，单次启动带本地记忆的 Codex：
+**[docs/deploy-local-ai.md](docs/deploy-local-ai.md)** — 硬件、目录、llama.cpp、要下哪些模型（含 SHA-256）、生成配置、编译 WinUI、第一次聊天。
 
 ```powershell
-& 'D:\codex\experiments\memos-local-codex\scripts\start-codex-with-memos.ps1'
+git clone https://github.com/luokow/memos-local-codex.git
+cd memos-local-codex
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap-local-ai.ps1
 ```
 
-传递 Codex 参数也可以，例如：
+然后下载 CUDA 版 `llama-server` 到 `llama\bin`，下载聊天 GGUF 到 `models\`（表在部署文档），再：
 
 ```powershell
-& 'D:\codex\experiments\memos-local-codex\scripts\start-codex-with-memos.ps1' --cd 'D:\codex'
+cd local-chat
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-winui.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\create-desktop-shortcut.ps1
 ```
 
-需要持久配置时，可参考 `codex-mcp-fragment.toml`；当前活跃任务没有改写用户级 `%USERPROFILE%\.codex\config.toml`。
+## 组件
 
-## 验证和维护
+| 组件 | 作用 | 打开客户端是否必须 |
+|---|---|---|
+| WinUI `local-chat` | Local AI 窗口（聊天 / 视频 / 汉化） | 是 |
+| `llama-server` | OpenAI 兼容 HTTP，只绑 `127.0.0.1:18135` | 是 |
+| Qwen3.5-9B Q4_K_M | 聊天 | 是 |
+| Sakura-Galtransl-7B v3.7 | 汉化填字 | 否 |
+| `hanhua/` | 汉化页调用的 Python 脚本 | 否 |
+| MemOS + MCP | Codex 记忆工具 | 否 |
+| ComfyUI + MiniMax H3 | 视频页 | 否 |
+
+聊天和视频/嵌字在 8GB 显存上互斥。不要用 Ollama `11434`，不要用 MT 适配 `18765`。
+
+## 模型（摘要）
+
+完整体积、SHA-256、许可和放置路径见 [部署文档第 5 节](docs/deploy-local-ai.md#5-下载模型)。
+
+| 用途 | 上游 | 文件 |
+|---|---|---|
+| 聊天 | [HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive](https://huggingface.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive) | `Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf` |
+| 填字 | [SakuraLLM/Sakura-GalTransl-7B-v3.7](https://huggingface.co/SakuraLLM/Sakura-GalTransl-7B-v3.7)（非商用） | `Sakura-Galtransl-7B-v3.7.gguf` |
+
+8GB 聊天档案建议：上下文 32768、GPU 层 99、并发 1、思考关、Jinja 开。填字档案建议上下文 8192。客户端启动时还会加上 flash-attn / q8 KV / ngram-mod 等 8GB 默认参数。
+
+## 配置示例
+
+| 入库示例 | 本机复制为 |
+|---|---|
+| `runtime/model-service.example.json` | `runtime/model-service.json` |
+| `runtime/model-profiles.example.json` | `runtime/model-profiles.json` |
+| `runtime/video-model-profiles.example.json` | `runtime/video-model-profiles.json` |
+
+`bootstrap-local-ai.ps1` 会在目标不存在时复制。本机 json、锁、日志、GGUF 已在 `.gitignore`。
+
+共享服务只允许回环。Qwen Local 与 MemOS 抢同一份 `model-service.json` 和启动锁。生命周期写在 `runtime/logs/model-service-lifecycle.jsonl`，不含提示词。
+
+## 客户端习惯
+
+- 应用打开时不加载模型；第一次发送或点「立即启动」才拉起
+- 汉化入口是「**开始汉化**」。右上角「启动」只动显卡
+- 界面说明：[`local-chat/README.md`](local-chat/README.md)
+
+## MemOS / Codex（可选）
+
+记忆库、向量模型和 MCP 工具（`memos_recall` / `memos_remember` / `memos_health` / `memos_list_recent`）给 Codex 用，不是聊天客户端的前置。
 
 ```powershell
-cd 'D:\codex\experiments\memos-local-codex'
-npm run audit:prod
+npm install
 npm test
-npm run accept:lock-cross-language
-npm run accept:lifecycle:read-only
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-codex-with-memos.ps1
 ```
 
-`accept:lifecycle:read-only` 要求模型先处于停止状态，并验证健康检查和最近记忆列表不会启动服务。`accept:lifecycle:recall` 会执行真实召回，验证共享配置、进程身份和按需启动。`accept:lifecycle:remember` 在系统临时目录建立隔离的 MemOS 数据库，执行真实 remember 和同义 recall，关闭测试 MCP 后删除整个临时目录。`npm run smoke` 会写入当前运行库，只在需要持久化读写验收时使用。
+`accept:lifecycle:read-only` 要求模型先停着，并确认健康检查不会启动服务。持久化 MCP 片段见 `codex-mcp-fragment.toml`；不要改用户级 `%USERPROFILE%\.codex\config.toml`，除非你明确要长期接上。
+
+安全边界见 [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md)。

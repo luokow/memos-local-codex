@@ -52,6 +52,6 @@ public sealed record AppPaths(
                 && Directory.Exists(System.IO.Path.Combine(current.Parent.FullName, "llama")))
                 return current.FullName;
         }
-        throw new InvalidOperationException("找不到 local-chat 项目根目录；请从 D 盘发布目录启动程序");
+        throw new InvalidOperationException("找不到 local-chat 项目根目录；请保证 llama 目录与 local-chat 同级后再从已注册的客户端启动");
     }
 }
