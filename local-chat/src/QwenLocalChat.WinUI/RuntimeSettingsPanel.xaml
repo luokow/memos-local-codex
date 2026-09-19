@@ -442,7 +442,7 @@
                                 <StackPanel Spacing="8">
                                     <StackPanel Spacing="2">
                                         <TextBlock Text="汉化路径" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                        <TextBlock Text="即时。用浏览选择目录和文件，不要手填本机绝对路径。汉化页调度现有 Python 脚本。密钥仍在原配置里，不要填到这里。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                        <TextBlock Text="即时。用浏览选择目录和文件。本机填字用档案和 GGUF；云端用下面的 JSON。密钥留在该文件里，不要填到这里。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
                                     </StackPanel>
                                     <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
                                     <Grid ColumnSpacing="8">
@@ -486,6 +486,15 @@
                                         <Button Grid.Column="1" x:Name="HanhuaFillModelPickButton" AutomationProperties.AutomationId="HanhuaFillModelPickButton" AutomationProperties.Name="浏览填字模型文件" Content="浏览" Click="HanhuaFillModelPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
                                     </Grid>
                                     <TextBlock Text="填字档案和 GGUF 路径都可以改，不影响聊天默认档案。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="HanhuaCloudConfigBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaCloudConfigSetting" Header="云端配置文件" PlaceholderText="选择含 baseUrl / model 的 JSON" TextWrapping="Wrap" />
+                                        <Button Grid.Column="1" x:Name="HanhuaCloudConfigPickButton" AutomationProperties.AutomationId="HanhuaCloudConfigPickButton" AutomationProperties.Name="浏览云端配置文件" Content="浏览" Click="HanhuaCloudConfigPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
+                                    </Grid>
+                                    <TextBlock Text="云端引擎只用这份配置。换线路就换文件，不必改代码。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>

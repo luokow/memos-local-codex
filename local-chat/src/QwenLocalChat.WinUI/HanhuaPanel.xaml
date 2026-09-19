@@ -74,9 +74,9 @@
                         AutomationProperties.Name="汉化引擎"
                         MinWidth="112"
                         SelectionChanged="EngineBox_SelectionChanged"
-                        ToolTipService.ToolTip="默认本机 Qwen。阿里云走现有 qwen-mt，密钥仍在原配置里。">
-                        <ComboBoxItem Content="本机 Qwen" Tag="local" />
-                        <ComboBoxItem Content="阿里云" Tag="aliyun" />
+                        ToolTipService.ToolTip="本机走设置里的填字模型。云端走设置里的配置文件，密钥不进 Local AI。">
+                        <ComboBoxItem Content="本机" Tag="local" />
+                        <ComboBoxItem Content="云端" Tag="aliyun" />
                     </ComboBox>
                 </StackPanel>
 
@@ -123,7 +123,7 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <Button x:Name="HanhuaSettingsButton" AutomationProperties.AutomationId="HanhuaSettingsButton" AutomationProperties.Name="模型设置" Content="设置" Click="SettingsButton_Click" Style="{StaticResource ToolbarButtonStyle}" />
                     <Button x:Name="OpenHanhuaOutputButton" AutomationProperties.AutomationId="OpenHanhuaOutputButton" AutomationProperties.Name="打开汉化结果" Content="打开结果" Click="OpenOutputButton_Click" IsEnabled="False" Style="{StaticResource ToolbarButtonStyle}" />
-                    <Button x:Name="CatchUpHanhuaButton" AutomationProperties.AutomationId="HanhuaCatchUpButton" AutomationProperties.Name="补翻译" Content="补翻译" Click="CatchUpButton_Click" Visibility="Collapsed" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="只补未译对白和缺页，不整本重抽。" />
+                    <Button x:Name="CatchUpHanhuaButton" AutomationProperties.AutomationId="HanhuaCatchUpButton" AutomationProperties.Name="补翻译" Content="补翻译" Click="CatchUpButton_Click" Visibility="Collapsed" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="漫画只补未译对白和缺页；Unity 收 unmatched 再填，不重装插件。" />
                     <Button x:Name="CancelHanhuaButton" AutomationProperties.AutomationId="CancelHanhuaButton" AutomationProperties.Name="取消汉化" Content="取消" Click="StartOrCancel_Click" Visibility="Collapsed" Style="{StaticResource ToolbarButtonStyle}" />
                 </StackPanel>
             </Grid>

@@ -204,9 +204,11 @@ var tests = new (string Name, Action Body)[]
     ("video-media-settings-cap-at-node-max", VideoMediaSettingsCapAtNodeMax),
     ("video-workflow-parameters-override-sampler-inputs", VideoWorkflowParametersOverrideSamplerInputs),
     ("hanhua-settings-default-and-roundtrip", HanhuaSettingsDefaultAndRoundTrip),
+    ("hanhua-cloud-config-is-selected-in-settings", HanhuaCloudConfigIsSelectedInSettings),
     ("settings-section-follows-workspace", SettingsSectionFollowsWorkspace),
     ("hanhua-game-command-local-and-aliyun", HanhuaGameCommandLocalAndAliyun),
     ("hanhua-unity-command-routes-without-rewriting-rm", HanhuaUnityCommandRoutesWithoutRewritingRm),
+    ("hanhua-unity-catch-up-fills-without-reinstall", HanhuaUnityCatchUpFillsWithoutReinstall),
     ("hanhua-image-commands-order-and-engine", HanhuaImageCommandsOrderAndEngine),
     ("hanhua-catch-up-reuses-work-and-skips-ocr-when-complete", HanhuaCatchUpReusesWorkAndSkipsOcrWhenComplete),
     ("hanhua-catch-up-commands-pass-missing-and-changed-flags", HanhuaCatchUpCommandsPassMissingAndChangedFlags),
@@ -3994,7 +3996,10 @@ static void HanhuaSettingsDefaultAndRoundTrip()
     Equal("", LocalChatSettings.SafeDefaults.HanhuaPythonExe, "hanhua python path must not bake this user");
     Equal("", LocalChatSettings.SafeDefaults.HanhuaMitRoot, "hanhua MIT path must not bake a machine folder");
     Equal("", LocalChatSettings.SafeDefaults.HanhuaFillProfileId, "hanhua fill profile must come from settings, not a constant");
-    Equal(HanhuaEngineCodec.Local, LocalChatSettings.SafeDefaults.HanhuaEngine, "hanhua engine must default to local Qwen");
+    Equal("", LocalChatSettings.SafeDefaults.HanhuaCloudConfig, "hanhua cloud config must come from settings, not a constant");
+    Equal(HanhuaEngineCodec.Local, LocalChatSettings.SafeDefaults.HanhuaEngine, "hanhua engine must default to local");
+    Equal(HanhuaEngine.Aliyun, HanhuaEngineCodec.Parse("cloud"), "cloud is the generic name for the remote engine");
+    Equal(HanhuaEngine.Aliyun, HanhuaEngineCodec.Parse("aliyun"), "legacy aliyun settings still mean cloud");
     Equal(false, LocalChatSettings.SafeDefaults.HanhuaPackRoot.Contains(@"D:\grok", StringComparison.OrdinalIgnoreCase), "defaults must not mention D:\\grok");
     Equal(false, LocalChatSettings.SafeDefaults.HanhuaPythonExe.Contains("Users\\kow", StringComparison.OrdinalIgnoreCase), "defaults must not mention this Windows user");
 
@@ -4009,6 +4014,7 @@ static void HanhuaSettingsDefaultAndRoundTrip()
             HanhuaPythonExe = @"D:\python.exe",
             HanhuaMitRoot = @"D:\mit",
             HanhuaFillProfileId = "my-fill",
+            HanhuaCloudConfig = @"D:\cloud.json",
             HanhuaEngine = "aliyun",
         };
         new SettingsStore(path).Save(settings);
@@ -4017,6 +4023,7 @@ static void HanhuaSettingsDefaultAndRoundTrip()
         Equal(@"D:\python.exe", reloaded.HanhuaPythonExe, "hanhua python path must round-trip");
         Equal(@"D:\mit", reloaded.HanhuaMitRoot, "hanhua MIT path must round-trip");
         Equal("my-fill", reloaded.HanhuaFillProfileId, "hanhua fill profile must round-trip");
+        Equal(@"D:\cloud.json", reloaded.HanhuaCloudConfig, "hanhua cloud config must round-trip");
         Equal("aliyun", reloaded.HanhuaEngine, "hanhua engine must round-trip");
         Equal(true, reloaded.EnforceTextVideoModelExclusivity, "saving hanhua paths must not disable exclusivity");
 
@@ -4026,14 +4033,66 @@ static void HanhuaSettingsDefaultAndRoundTrip()
         Equal("", normalized.HanhuaPackRoot, "missing pack path must stay empty so the user can fill settings");
         Equal("", normalized.HanhuaFillProfileId, "missing fill profile must stay empty");
 
-        File.WriteAllText(path, "{\"hanhua_pack_root\":\"\",\"hanhua_python_exe\":\"  \",\"hanhua_mit_root\":\"\",\"hanhua_fill_profile_id\":\"  \"}");
+        File.WriteAllText(path, "{\"hanhua_pack_root\":\"\",\"hanhua_python_exe\":\"  \",\"hanhua_mit_root\":\"\",\"hanhua_fill_profile_id\":\"  \",\"hanhua_cloud_config\":\"  \"}");
         var blank = new SettingsStore(path).Load().Settings.Normalized();
         Equal("", blank.HanhuaPackRoot, "blank pack path must stay empty");
         Equal("", blank.HanhuaPythonExe, "blank python path must stay empty");
         Equal("", blank.HanhuaMitRoot, "blank MIT path must stay empty");
         Equal("", blank.HanhuaFillProfileId, "blank fill profile must stay empty");
+        Equal("", blank.HanhuaCloudConfig, "blank cloud config must stay empty");
     }
     finally { Directory.Delete(directory, recursive: true); }
+}
+
+static void HanhuaCloudConfigIsSelectedInSettings()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"hanhua-cloud-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        var settings = HanhuaFixtureSettings(root);
+        var cloudJson = Path.Combine(root, "cloud.json");
+        File.WriteAllText(cloudJson, """{"baseUrl":"https://example.test/v1","apiKey":"secret","model":"demo-mt"}""");
+        Equal(null, HanhuaCommand.Validate(settings, HanhuaKind.Game), "local engine does not need a cloud config");
+        Equal(null, HanhuaCommand.Validate(settings with { HanhuaEngine = "aliyun" }, HanhuaKind.Game), "empty cloud path falls back to Python MTool config");
+        var missingFile = Path.Combine(root, "missing-cloud.json");
+        var missing = HanhuaCommand.Validate(settings with { HanhuaEngine = "aliyun", HanhuaCloudConfig = missingFile }, HanhuaKind.Game);
+        Equal(true, missing is not null && missing.Contains("不存在", StringComparison.Ordinal), "a selected cloud file that is missing must fail");
+        Equal(false, missing!.Contains("secret", StringComparison.OrdinalIgnoreCase), "validation must not echo the API key");
+
+        var ready = settings with { HanhuaEngine = "aliyun", HanhuaCloudConfig = cloudJson };
+        Equal(null, HanhuaCommand.Validate(ready, HanhuaKind.Game), "cloud engine with a config file is ready");
+
+        var game = Path.Combine(root, "game");
+        Directory.CreateDirectory(game);
+        var local = HanhuaCommand.Game(ready, HanhuaEngine.LocalQwen, game);
+        Equal(false, local.Environment.ContainsKey(HanhuaCommand.CloudConfigEnv), "local engine must not pin a cloud config");
+        var cloud = HanhuaCommand.Game(ready, HanhuaEngine.Aliyun, game);
+        Equal(cloudJson, cloud.Environment[HanhuaCommand.CloudConfigEnv], "cloud game must pass the selected config path");
+        Equal(false, cloud.Environment.Values.Any(value => value.Contains("secret", StringComparison.Ordinal)), "cloud env must pass the file path, not the key");
+
+        var work = HanhuaCommand.ImageWorkPath(ready.HanhuaPackRoot, "job-cloud");
+        var fill = HanhuaCommand.ImageFill(ready, HanhuaEngine.Aliyun, work);
+        Equal(true, fill.Arguments.Contains("--mt"), "cloud fill still uses the remote translator flag");
+        Equal(cloudJson, fill.Environment[HanhuaCommand.CloudConfigEnv], "cloud fill must pass the selected config path");
+
+        var unity = Path.Combine(root, "unity");
+        Directory.CreateDirectory(unity);
+        File.WriteAllBytes(Path.Combine(unity, "GameAssembly.dll"), [1]);
+        Directory.CreateDirectory(Path.Combine(unity, "Demo_Data"));
+        var unityCloud = HanhuaCommand.Unity(ready, HanhuaEngine.Aliyun, unity, fill: true);
+        Equal(cloudJson, unityCloud.Environment[HanhuaCommand.CloudConfigEnv], "cloud Unity fill must pass the selected config path");
+        Equal(false, unityCloud.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "cloud Unity fill must not pin GalTransl");
+        Equal(
+            "本机填字模型没能自动启动，填字无法继续。",
+            HanhuaErrorPresentation.Summarize("请先启动文本模型", HanhuaPhase.Fill),
+            "local fill errors must not name a specific chat model");
+        Equal(
+            false,
+            HanhuaProgressStatus.StartBanner(HanhuaKind.Game).Contains("Qwen", StringComparison.Ordinal),
+            "start copy must stay generic");
+    }
+    finally { Directory.Delete(root, recursive: true); }
 }
 
 static void HanhuaGameCommandLocalAndAliyun()
@@ -4094,6 +4153,7 @@ static void HanhuaUnityCommandRoutesWithoutRewritingRm()
         Equal(true, install.Arguments.Any(a => a.EndsWith("one_click_unity.py", StringComparison.OrdinalIgnoreCase)), "Unity install uses one_click_unity.py");
         Equal(true, install.Arguments.Contains("--progress-jsonl"), "Unity install reports progress");
         Equal(false, install.Arguments.Contains("--fill"), "install does not fill");
+        Equal(true, install.Arguments.Contains("--install-only"), "install skips Python default fill");
         Equal(false, install.Arguments.Contains("--local"), "Unity does not use RM --local");
         Equal(false, install.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "install does not pin GalTransl");
 
@@ -4117,6 +4177,46 @@ static void HanhuaUnityCommandRoutesWithoutRewritingRm()
             "选 RPG Maker（Game.exe）或 Unity 游戏目录，点开始汉化即可。不用点右上角启动。",
             HanhuaProgressStatus.EmptyHint(HanhuaKind.Game),
             "empty hint must mention Unity");
+    }
+    finally { Directory.Delete(root, recursive: true); }
+}
+
+static void HanhuaUnityCatchUpFillsWithoutReinstall()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"hanhua-unity-cu-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        var settings = HanhuaFixtureSettings(root);
+        var unity = Path.Combine(root, "unity");
+        Directory.CreateDirectory(unity);
+        File.WriteAllBytes(Path.Combine(unity, "GameAssembly.dll"), [1]);
+        Directory.CreateDirectory(Path.Combine(unity, "Demo_Data"));
+        File.WriteAllBytes(Path.Combine(unity, "Demo.exe"), [1]);
+        var text = Path.Combine(unity, "BepInEx", "Translation", "zh-CN", "Text");
+        Directory.CreateDirectory(text);
+        File.WriteAllText(Path.Combine(text, "01_filled.txt"), "こんにちは=你好\n");
+
+        Equal(true, HanhuaCommand.UnityHasDump(unity), "filled glossary counts as dump");
+        var fromDisk = HanhuaCatchUp.UnityFromSource(unity);
+        Equal(true, fromDisk is not null, "Unity folder with Text glossary can catch up without a prior job");
+        Equal(true, HanhuaCatchUp.CanCatchUp(fromDisk), "synthetic Unity job can catch up");
+        var again = HanhuaCatchUp.UnityFromSource(unity);
+        Equal(fromDisk!.Id, again!.Id, "synthetic Unity job id must be stable for the same folder");
+        Equal(true, fromDisk.Id.StartsWith("unity-", StringComparison.Ordinal), "synthetic id stays namespaced");
+        Equal(false, int.TryParse(fromDisk.Id["unity-".Length..], System.Globalization.NumberStyles.HexNumber, null, out _), "id must not be a runtime GetHashCode");
+        var phases = HanhuaCatchUp.Phases(fromDisk!);
+        Equal(1, phases.Count, "Unity catch-up is fill only");
+        Equal(HanhuaPhase.Translate, phases[0], "Unity catch-up starts at translate");
+        Equal(HanhuaPhase.Translate, HanhuaCatchUp.Begin(fromDisk!).Phase, "begin uses translate");
+
+        var fill = HanhuaCommand.Unity(settings, HanhuaEngine.LocalQwen, unity, fill: true);
+        Equal(true, fill.Arguments.Contains("--fill"), "补翻译 uses --fill");
+        Equal(false, fill.Arguments.Contains("--install-only"), "补翻译 does not reinstall");
+
+        Equal(true, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
+            HanhuaKind.Game, unity, null, []),
+            "Unity with glossary asks continue vs fresh even without a stored job");
     }
     finally { Directory.Delete(root, recursive: true); }
 }
@@ -4189,7 +4289,7 @@ static void HanhuaCatchUpReusesWorkAndSkipsOcrWhenComplete()
         Equal(true, HanhuaCatchUp.NeedsOcr(source, work), "a new jpg cover requires missing-only OCR");
 
         var game = ready with { Kind = HanhuaKind.Game, Phase = HanhuaPhase.Inject };
-        Equal(false, HanhuaCatchUp.CanCatchUp(game), "game jobs do not use image catch-up");
+        Equal(false, HanhuaCatchUp.CanCatchUp(game), "RPG Maker folders do not use image catch-up");
         Equal(false, HanhuaCatchUp.CanCatchUp(ready with { Status = HanhuaJobStatus.Running }), "active jobs cannot catch up");
         Equal(false, HanhuaCatchUp.CanCatchUp(ready with { WorkPath = Path.Combine(root, "missing") }), "missing work folder cannot catch up");
     }
@@ -4231,7 +4331,7 @@ static void HanhuaStartPromptsWhenSameSourceAlreadySucceeded()
             "a different folder is a new book");
         Equal(false, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
             HanhuaKind.Game, source, done, [done]),
-            "game jobs do not use the image duplicate prompt");
+            "RPG Maker folders do not use the image duplicate prompt");
         Equal(false, HanhuaCatchUp.ShouldPromptInsteadOfFreshStart(
             HanhuaKind.Image, source, done, [done with { WorkPath = Path.Combine(root, "missing") }]),
             "missing work folder cannot be continued");

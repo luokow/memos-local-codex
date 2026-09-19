@@ -15,8 +15,15 @@ CONF = Path(r"D:\grok\MTool\Tool\plugins\deepseek_config.json")
 CHUNK = 20
 
 
+def cloud_config_path() -> Path:
+    env = str(os.environ.get("HANHUA_CLOUD_CONFIG") or "").strip()
+    if env:
+        return Path(env)
+    return CONF
+
+
 def load_upstream() -> tuple[str, str, str]:
-    cfg = json.loads(CONF.read_text(encoding="utf-8"))
+    cfg = json.loads(cloud_config_path().read_text(encoding="utf-8"))
     url = local_qwen.completions_url(str(cfg["baseUrl"]))
     return url, str(cfg["apiKey"]), str(cfg["model"])
 

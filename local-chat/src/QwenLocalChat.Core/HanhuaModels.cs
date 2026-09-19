@@ -49,9 +49,14 @@ public static class HanhuaEngineCodec
     public const string Aliyun = "aliyun";
 
     public static HanhuaEngine Parse(string? value)
-        => string.Equals(value?.Trim(), Aliyun, StringComparison.OrdinalIgnoreCase)
-            ? HanhuaEngine.Aliyun
-            : HanhuaEngine.LocalQwen;
+    {
+        var text = value?.Trim();
+        if (string.Equals(text, Aliyun, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(text, "cloud", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(text, "mt", StringComparison.OrdinalIgnoreCase))
+            return HanhuaEngine.Aliyun;
+        return HanhuaEngine.LocalQwen;
+    }
 
     public static string ToJson(HanhuaEngine engine)
         => engine == HanhuaEngine.Aliyun ? Aliyun : Local;

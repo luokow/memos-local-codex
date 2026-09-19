@@ -94,9 +94,11 @@ public sealed partial class HanhuaPanel : UserControl
             {
                 _job = catchUp;
                 SourcePathBox.Text = catchUp.SourcePath;
-                SelectTagged(KindBox, "image");
+                SelectTagged(KindBox, catchUp.Kind == HanhuaKind.Image ? "image" : "game");
                 OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(catchUp.OutputPath);
-                SetIdleStatus("上次图片汉化可点补翻译，或点开始汉化选择接着上次/全新。");
+                SetIdleStatus(catchUp.Kind == HanhuaKind.Image
+                    ? "上次图片汉化可点补翻译，或点开始汉化选择接着上次/全新。"
+                    : "上次 Unity 汉化可点补翻译，只填 unmatched / 未译句子。");
             }
         }
         UpdateButtons();
@@ -228,8 +230,13 @@ public sealed partial class HanhuaPanel : UserControl
             return _job;
         if (_store is null || string.IsNullOrWhiteSpace(source))
             return null;
-        return HanhuaCatchUp.Latest(
+        var fromStore = HanhuaCatchUp.Latest(
             _store.Load().Jobs.Where(job => HanhuaCatchUp.SameSource(job.SourcePath, source)));
+        if (fromStore is not null)
+            return fromStore;
+        return SelectedKind == HanhuaKind.Game
+            ? HanhuaCatchUp.UnityFromSource(source)
+            : null;
     }
 
     private bool ShouldPromptDuplicateStart()
@@ -271,7 +278,7 @@ public sealed partial class HanhuaPanel : UserControl
             var target = CatchUpTarget();
             if (target is null)
             {
-                SetIdleStatus("没有可补的图片任务。请先完成一次图片汉化。");
+                SetIdleStatus("没有可补的汉化任务。漫画请先完成一次；Unity 请选已装过汉化插件的游戏目录。");
                 return;
             }
             source = target.SourcePath;
@@ -285,8 +292,8 @@ public sealed partial class HanhuaPanel : UserControl
             var missingCatchUp = HanhuaCommand.Validate(settings, kind);
             if (missingCatchUp is not null) { SetIdleStatus(missingCatchUp); return; }
             SourcePathBox.Text = source;
-            SelectTagged(KindBox, "image");
-            _runPhases = HanhuaCatchUp.Phases(source, target.WorkPath ?? "");
+            SelectTagged(KindBox, kind == HanhuaKind.Image ? "image" : "game");
+            _runPhases = HanhuaCatchUp.Phases(target);
             job = HanhuaCatchUp.Begin(target);
         }
         else
@@ -327,7 +334,9 @@ public sealed partial class HanhuaPanel : UserControl
         ResultPreview.Visibility = Visibility.Collapsed;
         var unityJob = kind == HanhuaKind.Game && HanhuaCommand.LooksLikeUnity(source);
         AppendLog(catchUp
-            ? "补翻译：只填未译句子，缺页才抽字，改动页才嵌字。"
+            ? unityJob
+                ? "补翻译：收 unmatched 并填未译句子，不重装插件。"
+                : "补翻译：只填未译句子，缺页才抽字，改动页才嵌字。"
             : HanhuaProgressStatus.StartBanner(kind, unityJob));
         StartElapsedTicker();
         ApplyProgressUi();
@@ -335,7 +344,12 @@ public sealed partial class HanhuaPanel : UserControl
         try
         {
             if (kind == HanhuaKind.Game && HanhuaCommand.LooksLikeUnity(source))
-                await RunUnityAsync(settings, job, source, _runCts.Token);
+            {
+                if (catchUp)
+                    await RunUnityCatchUpAsync(settings, job, source, _runCts.Token);
+                else
+                    await RunUnityAsync(settings, job, source, _runCts.Token);
+            }
             else if (kind == HanhuaKind.Game)
                 await RunLaunchAsync(HanhuaCommand.Game(settings, job.Engine, source, FillModel(settings)), job.Engine, HanhuaPhase.Translate, _runCts.Token);
             else if (catchUp)
@@ -387,6 +401,18 @@ public sealed partial class HanhuaPanel : UserControl
                 cancellationToken);
             if (_job.Status == HanhuaJobStatus.Cancelling) return;
         }
+        _job = _job with { OutputPath = root, UpdatedUtc = DateTimeOffset.UtcNow };
+    }
+
+    private async Task RunUnityCatchUpAsync(LocalChatSettings settings, HanhuaJob job, string source, CancellationToken cancellationToken)
+    {
+        var root = HanhuaCommand.ResolveUnityRoot(source) ?? source;
+        await RunLaunchAsync(
+            HanhuaCommand.Unity(settings, job.Engine, root, fill: true, FillModel(settings)),
+            job.Engine,
+            HanhuaPhase.Translate,
+            cancellationToken);
+        if (_job is null || _job.Status == HanhuaJobStatus.Cancelling) return;
         _job = _job with { OutputPath = root, UpdatedUtc = DateTimeOffset.UtcNow };
     }
 

@@ -371,6 +371,8 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         HanhuaPythonExeBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPythonExe);
         HanhuaMitRootBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaMitRoot);
         PopulateHanhuaFillProfile(settings.HanhuaFillProfileId);
+        if (HanhuaCloudConfigBox is not null)
+            HanhuaCloudConfigBox.Text = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaCloudConfig);
         SelectSessionSortMode(settings.SessionSortMode);
         var attachments = settings.ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults;
         ChatAttachTextToggle.IsOn = attachments.AllowText;
@@ -434,6 +436,9 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             case HanhuaSettingsPathKind.FillModel:
                 HanhuaFillModelPathBox.Text = value;
                 break;
+            case HanhuaSettingsPathKind.CloudConfig:
+                HanhuaCloudConfigBox.Text = value;
+                break;
         }
     }
 
@@ -448,6 +453,9 @@ public sealed partial class RuntimeSettingsPanel : UserControl
 
     private void HanhuaFillModelPickButton_Click(object sender, RoutedEventArgs e)
         => HanhuaPathPickRequested?.Invoke(this, HanhuaSettingsPathKind.FillModel);
+
+    private void HanhuaCloudConfigPickButton_Click(object sender, RoutedEventArgs e)
+        => HanhuaPathPickRequested?.Invoke(this, HanhuaSettingsPathKind.CloudConfig);
 
     private TextModelProfile? SelectedTextProfile => TextModelProfileBox.SelectedItem as TextModelProfile;
     private VideoModelProfile? SelectedVideoProfile => VideoModelProfileBox.SelectedItem as VideoModelProfile;
@@ -672,6 +680,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             HanhuaPythonExe = LocalChatSettings.CoalesceHanhuaPath(HanhuaPythonExeBox.Text),
             HanhuaMitRoot = LocalChatSettings.CoalesceHanhuaPath(HanhuaMitRootBox.Text),
             HanhuaFillProfileId = (HanhuaFillProfileBox.SelectedItem as TextModelProfile)?.Id ?? "",
+            HanhuaCloudConfig = LocalChatSettings.CoalesceHanhuaPath(HanhuaCloudConfigBox.Text),
             HanhuaEngine = HanhuaEngineCodec.ToJson(HanhuaEngineCodec.Parse(_original.HanhuaEngine)),
             SelectedTextProfileId = SelectedTextProfile?.Id,
             SelectedVideoProfileId = SelectedVideoProfile?.Id,
@@ -828,6 +837,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
                 HanhuaPythonExe = "",
                 HanhuaMitRoot = "",
                 HanhuaFillProfileId = "",
+                HanhuaCloudConfig = "",
             });
             return;
         }

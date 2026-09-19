@@ -270,10 +270,10 @@ def translate_one(src_arg: Path, *, dry_run: bool, engine: str = "mt") -> int:
         if engine == "local":
             log("翻译走本地 Qwen 对话口 127.0.0.1:18135。先开 Local AI，不要同时开 MiniMax H3。")
         else:
-            conf = translate_direct.CONF
+            conf = translate_direct.cloud_config_path()
             if not conf.is_file():
                 log(f"找不到 API 配置: {conf}")
-                log("一键翻译用的是现有那条阿里云线路，配置不在就没法翻。")
+                log("云端翻译需要一份含 baseUrl / model 的 JSON 配置。")
                 return 1
         log(f"开始翻译 {empty} 句，可以去干别的，别关这个窗口。")
         local_qwen.emit("phase", "translate", done=0, total=empty, message=f"开始翻译 {empty} 句")

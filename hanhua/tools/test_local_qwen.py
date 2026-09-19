@@ -95,6 +95,33 @@ class LocalQwenRoutingTests(unittest.TestCase):
         self.assertEqual(translate_direct.resolve_engine(None), "mt")
         self.assertEqual(translate_direct.resolve_engine("local"), "local")
 
+    def test_cloud_config_path_uses_env_not_baked_file(self) -> None:
+        import tempfile
+
+        previous = os.environ.get("HANHUA_CLOUD_CONFIG")
+        with tempfile.TemporaryDirectory() as raw:
+            chosen = Path(raw) / "cloud.json"
+            chosen.write_text(
+                '{"baseUrl":"https://example.test/v1","apiKey":"secret","model":"demo-mt"}',
+                encoding="utf-8",
+            )
+            try:
+                os.environ["HANHUA_CLOUD_CONFIG"] = str(chosen)
+                self.assertEqual(translate_direct.cloud_config_path(), chosen)
+                url, key, model = translate_direct.load_upstream()
+                self.assertEqual(url, "https://example.test/v1/chat/completions")
+                self.assertEqual(key, "secret")
+                self.assertEqual(model, "demo-mt")
+                os.environ.pop("HANHUA_CLOUD_CONFIG", None)
+                fallback = translate_direct.cloud_config_path()
+                self.assertEqual(fallback, translate_direct.CONF)
+                self.assertNotEqual(fallback, chosen)
+            finally:
+                if previous is None:
+                    os.environ.pop("HANHUA_CLOUD_CONFIG", None)
+                else:
+                    os.environ["HANHUA_CLOUD_CONFIG"] = previous
+
     def test_cloud_bat_has_no_local_flag(self) -> None:
         bat = (PACK / "点我翻译游戏.bat").read_text(encoding="ascii", errors="replace")
         self.assertNotIn("--local", bat)

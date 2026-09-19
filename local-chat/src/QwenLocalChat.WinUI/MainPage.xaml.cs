@@ -93,7 +93,7 @@ public sealed partial class MainPage : Page
         NoticeText.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
         ToolTipService.SetToolTip(
             StartTextModelPageButton,
-            hanhua ? "填字阶段会自动启动本机 Qwen，一般不用点这里。" : null);
+            hanhua ? "填字阶段会自动启动本机模型，一般不用点这里。" : null);
         if (video) VideoPanel.RefreshPresetSummary();
         else if (chat) UpdateChatComposerLayout();
     }
@@ -504,6 +504,7 @@ public sealed partial class MainPage : Page
             {
                 HanhuaSettingsPathKind.PythonExe => await PickHanhuaFileAsync(".exe"),
                 HanhuaSettingsPathKind.FillModel => await PickHanhuaFileAsync(".gguf"),
+                HanhuaSettingsPathKind.CloudConfig => await PickHanhuaFileAsync(".json"),
                 HanhuaSettingsPathKind.MitRoot => await PickHanhuaFolderAsync("选择 manga-image-translator 目录"),
                 _ => await PickHanhuaFolderAsync("选择汉化工具包目录"),
             };
@@ -554,7 +555,7 @@ public sealed partial class MainPage : Page
             if (_modelManager is null) throw new InvalidOperationException("文本模型尚未初始化。");
             await _modelManager.EnsureAvailableAsync(cancellationToken);
             if (!await _modelManager.IsHealthyAsync(cancellationToken))
-                throw new InvalidOperationException("本机 Qwen 没能自动启动，填字无法继续。");
+                throw new InvalidOperationException("本机填字模型没能自动启动，填字无法继续。");
             UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
             return;
         }
@@ -571,7 +572,7 @@ public sealed partial class MainPage : Page
             await _modelManager.StopServiceAsync(cancellationToken);
         await VideoPanel.ReleaseModelAsync(cancellationToken);
         if (_modelManager is not null && await _modelManager.IsHealthyAsync(cancellationToken))
-            throw new InvalidOperationException("聊天服务仍在占用本地端口；OCR 和嵌字需要先停掉本机 Qwen。");
+            throw new InvalidOperationException("聊天服务仍在占用本地端口；OCR 和嵌字需要先停掉本机填字模型。");
         UpdateTextModelStatus(ModelLifecycleState.Released);
     }
 
@@ -583,7 +584,7 @@ public sealed partial class MainPage : Page
             if (_modelManager is null) throw new InvalidOperationException("文本模型尚未初始化。");
             await _modelManager.EnsureAvailableAsync(cancellationToken);
             if (!await _modelManager.IsHealthyAsync(cancellationToken))
-                throw new InvalidOperationException("本机 Qwen 没能自动启动，填字无法继续。");
+                throw new InvalidOperationException("本机填字模型没能自动启动，填字无法继续。");
             UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
             return;
         }

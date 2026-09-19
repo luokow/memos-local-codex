@@ -96,8 +96,8 @@ public static class HanhuaProgressStatus
         => kind == HanhuaKind.Image
             ? "漫画图片分三步，会自动连续跑完：抽字 → 填字 → 嵌字。不用点右上角启动。"
             : unity
-                ? "Unity 会先装插件，再预填已经玩到的句子。没有新句子就去玩游戏，再点开始汉化。不用点右上角启动。"
-                : "游戏文本会自动：复制 → 抽字 → 翻译 → 回写。本机 Qwen 会自动启动。";
+                ? "Unity 会先装插件并预填抽出的句子。漏句玩过后再点补翻译。不用点右上角启动。"
+                : "游戏文本会自动：复制 → 抽字 → 翻译 → 回写。本机模型会自动启动。";
 
     public static string EmptyHint(HanhuaKind kind)
         => kind == HanhuaKind.Image
@@ -107,7 +107,7 @@ public static class HanhuaProgressStatus
     public static string ComposerHint(HanhuaKind kind)
         => kind == HanhuaKind.Image
             ? "自动三步：抽字 → 填字 → 嵌字。完成后可点补翻译，只补未译句子和缺页。"
-            : "RPG Maker：复制 → 抽字 → 翻译 → 回写。Unity：装插件 → 预填已抽出的句子。本机模型会自动启动。";
+            : "RPG Maker：复制 → 抽字 → 翻译 → 回写。Unity：装插件并预填；漏句点补翻译。本机模型会自动启动。";
 
     public static string DuplicateStartPrompt
         => "这个目录已经汉化过。接着上次只补未译对白和缺页；全新会整本重抽。";

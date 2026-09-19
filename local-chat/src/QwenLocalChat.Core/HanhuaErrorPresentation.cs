@@ -16,9 +16,9 @@ public static class HanhuaErrorPresentation
         if (ContainsAny(text, "no png", "没有 png", "没有识别到文字"))
             return "这个目录里没有可用的对白图片。";
         if (ContainsAny(text, "请先启动文本模型", "not listening", "未就绪", "没能自动启动"))
-            return "本机 Qwen 没能自动启动，填字无法继续。";
+            return "本机填字模型没能自动启动，填字无法继续。";
         if (ContainsAny(text, "仍在占用", "still on 18135"))
-            return "抽字需要显卡，本机 Qwen 还没停干净。";
+            return "抽字需要显卡，本机填字模型还没停干净。";
         if (text.StartsWith("mit_exit=", StringComparison.OrdinalIgnoreCase)
             || text.Contains("脚本退出码", StringComparison.Ordinal))
             return $"{HanhuaProgressStatus.PhaseLabel(phase)}失败：图片工具异常退出。";

@@ -641,9 +641,23 @@ if ($settingsPanelSource -notmatch 'SettingsSectionSelector_SelectionChanged' -o
 if ($mainPageSource -notmatch 'OpenSettings\(SettingsSectionKind\.Hanhua\)') {
     throw 'The hanhua page settings button must open the hanhua settings section directly.'
 }
-foreach ($automationId in @('HanhuaPackRootPickButton', 'HanhuaPythonExePickButton', 'HanhuaMitRootPickButton', 'HanhuaFillModelPickButton', 'HanhuaFillModelPathSetting')) {
+foreach ($automationId in @('HanhuaPackRootPickButton', 'HanhuaPythonExePickButton', 'HanhuaMitRootPickButton', 'HanhuaFillModelPickButton', 'HanhuaFillModelPathSetting', 'HanhuaCloudConfigPickButton', 'HanhuaCloudConfigSetting')) {
     if ($null -eq $settingsPanel.SelectSingleNode("//*[@AutomationProperties.AutomationId='$automationId']", $settingsNs)) {
         throw "Hanhua settings path picker is missing: $automationId"
+    }
+}
+$engineItems = $hanhuaPanel.SelectNodes("//xaml:ComboBox[@x:Name='EngineBox']/xaml:ComboBoxItem", $hanhuaNs)
+$engineTags = @($engineItems | ForEach-Object { $_.GetAttribute('Tag') })
+$engineLabels = @($engineItems | ForEach-Object { $_.GetAttribute('Content') })
+if ($engineTags -notcontains 'local' -or $engineTags -notcontains 'aliyun') {
+    throw 'Hanhua engine selector must keep local and cloud tags.'
+}
+if ($engineLabels.Count -ne 2) {
+    throw 'Hanhua engine selector must expose exactly two generic choices.'
+}
+foreach ($label in $engineLabels) {
+    if ($label -match 'Qwen|Aliyun|aliyun' -or $label.Length -ne 2) {
+        throw "Hanhua engine label must stay a short generic name, got: $label"
     }
 }
 if ($settingsPanelSource -notmatch 'VideoGeneration\s*=\s*new VideoGenerationSettings') {

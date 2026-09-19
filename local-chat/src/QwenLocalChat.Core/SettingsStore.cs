@@ -164,6 +164,7 @@ public static class HanhuaSettingsPathKind
     public const string PythonExe = "python";
     public const string MitRoot = "mit";
     public const string FillModel = "fill";
+    public const string CloudConfig = "cloud";
 }
 
 public sealed record StartupModelPlan(
@@ -350,6 +351,10 @@ public sealed record LocalChatSettings
     [JsonPropertyName("hanhua_fill_profile_id")]
     public string HanhuaFillProfileId { get; init; } = "";
 
+    /// <summary>JSON with baseUrl/model for cloud fill. Keys stay in that file.</summary>
+    [JsonPropertyName("hanhua_cloud_config")]
+    public string HanhuaCloudConfig { get; init; } = "";
+
     /// <summary><c>local</c> or <c>aliyun</c>. Unknown values normalize to local.</summary>
     [JsonPropertyName("hanhua_engine")]
     public string HanhuaEngine { get; init; } = HanhuaEngineCodec.Local;
@@ -395,6 +400,7 @@ public sealed record LocalChatSettings
             HanhuaPythonExe = CoalesceHanhuaPath(HanhuaPythonExe),
             HanhuaMitRoot = CoalesceHanhuaPath(HanhuaMitRoot),
             HanhuaFillProfileId = CoalesceHanhuaPath(HanhuaFillProfileId),
+            HanhuaCloudConfig = CoalesceHanhuaPath(HanhuaCloudConfig),
             HanhuaEngine = HanhuaEngineCodec.ToJson(HanhuaEngineCodec.Parse(HanhuaEngine)),
         };
 
@@ -447,6 +453,7 @@ public sealed record LocalChatSettings
                && string.Equals(left.HanhuaPythonExe, right.HanhuaPythonExe, StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.HanhuaMitRoot, right.HanhuaMitRoot, StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.HanhuaFillProfileId, right.HanhuaFillProfileId, StringComparison.Ordinal)
+               && string.Equals(left.HanhuaCloudConfig, right.HanhuaCloudConfig, StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.HanhuaEngine, right.HanhuaEngine, StringComparison.Ordinal);
     }
 
@@ -458,6 +465,7 @@ public sealed record LocalChatSettings
                || !string.Equals(left.HanhuaPythonExe, right.HanhuaPythonExe, StringComparison.OrdinalIgnoreCase)
                || !string.Equals(left.HanhuaMitRoot, right.HanhuaMitRoot, StringComparison.OrdinalIgnoreCase)
                || !string.Equals(left.HanhuaFillProfileId, right.HanhuaFillProfileId, StringComparison.Ordinal)
+               || !string.Equals(left.HanhuaCloudConfig, right.HanhuaCloudConfig, StringComparison.OrdinalIgnoreCase)
                || !string.Equals(left.HanhuaEngine, right.HanhuaEngine, StringComparison.Ordinal);
     }
 
@@ -704,6 +712,7 @@ public sealed class SettingsStore(string path)
                 HanhuaPythonExe = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaPythonExe),
                 HanhuaMitRoot = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaMitRoot),
                 HanhuaFillProfileId = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaFillProfileId),
+                HanhuaCloudConfig = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaCloudConfig),
             }, null, null);
         }
         catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)

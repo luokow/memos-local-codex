@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace QwenLocalChat.Core;
 
 public static class HanhuaCatchUp
@@ -9,11 +12,39 @@ public static class HanhuaCatchUp
 
     public static bool CanCatchUp(HanhuaJob? job)
     {
-        if (job is null || job.IsActive || job.Kind != HanhuaKind.Image)
+        if (job is null || job.IsActive)
+            return false;
+        if (job.Kind == HanhuaKind.Game)
+            return HanhuaCommand.LooksLikeUnity(job.SourcePath)
+                && HanhuaCommand.UnityHasDump(job.SourcePath);
+        if (job.Kind != HanhuaKind.Image)
             return false;
         if (string.IsNullOrWhiteSpace(job.WorkPath) || !Directory.Exists(job.WorkPath))
             return false;
         return File.Exists(Path.Combine(job.WorkPath, "translations.json"));
+    }
+
+    public static HanhuaJob? UnityFromSource(string sourcePath)
+    {
+        var root = HanhuaCommand.ResolveUnityRoot(sourcePath);
+        if (root is null || !HanhuaCommand.UnityHasDump(root))
+            return null;
+        var now = DateTimeOffset.UtcNow;
+        return new HanhuaJob(
+            "unity-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(root.ToLowerInvariant())))[..12].ToLowerInvariant(),
+            HanhuaKind.Game,
+            HanhuaEngine.LocalQwen,
+            HanhuaPhase.Translate,
+            HanhuaJobStatus.Succeeded,
+            root,
+            null,
+            root,
+            0,
+            0,
+            "unity",
+            null,
+            now,
+            now);
     }
 
     public static HanhuaJob? Latest(IEnumerable<HanhuaJob> jobs)
@@ -33,7 +64,19 @@ public static class HanhuaCatchUp
         IEnumerable<HanhuaJob> jobs)
     {
         ArgumentNullException.ThrowIfNull(jobs);
-        if (kind != HanhuaKind.Image || string.IsNullOrWhiteSpace(sourcePath))
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return false;
+        if (kind == HanhuaKind.Game)
+        {
+            if (!HanhuaCommand.LooksLikeUnity(sourcePath))
+                return false;
+            if (currentJob is { CanResume: true, Kind: HanhuaKind.Game }
+                && SameSource(currentJob.SourcePath, sourcePath))
+                return false;
+            return Latest(jobs.Where(job => SameSource(job.SourcePath, sourcePath))) is not null
+                || HanhuaCommand.UnityHasDump(sourcePath);
+        }
+        if (kind != HanhuaKind.Image)
             return false;
         if (currentJob is { CanResume: true, Kind: HanhuaKind.Image }
             && SameSource(currentJob.SourcePath, sourcePath))
@@ -87,10 +130,18 @@ public static class HanhuaCatchUp
         return phases;
     }
 
+    public static IReadOnlyList<HanhuaPhase> Phases(HanhuaJob job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        if (job.Kind == HanhuaKind.Game)
+            return HanhuaCommand.UnityCatchUpPhases;
+        return Phases(job.SourcePath, job.WorkPath ?? "");
+    }
+
     public static HanhuaJob Begin(HanhuaJob job)
     {
         ArgumentNullException.ThrowIfNull(job);
-        var start = Phases(job.SourcePath, job.WorkPath ?? "").First();
+        var start = Phases(job).First();
         return job with
         {
             Status = HanhuaJobStatus.Running,
