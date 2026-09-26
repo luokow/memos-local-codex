@@ -108,6 +108,13 @@ if ($settingsHost.HasAttribute('Visibility')) {
 if ($settingsPanelSource -match '(?m)^\s*Visibility\s*=') {
     throw 'Runtime settings panel itself must not detach with Visibility changes.'
 }
+$settingsScrim = $settingsPanel.SelectSingleNode("//xaml:Rectangle[@x:Name='Scrim']", $settingsNs)
+if ($null -eq $settingsScrim) { throw 'Settings scrim is missing.' }
+Require-Equal 'False' $settingsScrim.IsHitTestVisible 'Closed settings scrim must not take hits until the drawer opens.'
+Require-Equal 'SettingsScrim' $settingsScrim.GetAttribute('AutomationProperties.AutomationId') 'Settings scrim must keep a stable automation id.'
+if ($settingsPanelSource -notmatch 'Scrim_Tapped' -or $settingsPanelSource -notmatch 'Scrim\.IsHitTestVisible\s*=\s*true') {
+    throw 'Clicking the open settings scrim must request the same close path as the close button.'
+}
 
 function Require-StringList($value, [string]$message) {
     $items = @($value)

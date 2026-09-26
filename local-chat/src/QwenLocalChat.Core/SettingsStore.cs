@@ -338,6 +338,14 @@ public sealed record LocalChatSettings
     [JsonPropertyName("chat_attachments")]
     public ChatAttachmentPolicy ChatAttachments { get; init; } = ChatAttachmentPolicy.SafeDefaults;
 
+    /// <summary>Per text-profile generation and attachment card. Startup parameters stay on the profile.</summary>
+    [JsonPropertyName("text_model_cards")]
+    public Dictionary<string, TextModelSettingsCard>? TextModelCards { get; init; }
+
+    /// <summary>Per video-profile generation defaults. Capability ranges stay on the video profile.</summary>
+    [JsonPropertyName("video_model_cards")]
+    public Dictionary<string, VideoGenerationSettings>? VideoModelCards { get; init; }
+
     [JsonPropertyName("hanhua_pack_root")]
     public string HanhuaPackRoot { get; init; } = "";
 
@@ -396,6 +404,8 @@ public sealed record LocalChatSettings
             VideoGeneration = (VideoGeneration ?? VideoGenerationSettings.SafeDefaults).Normalized(),
             VideoPromptPhrases = (VideoPromptPhrases ?? VideoPromptTemplatePhrases.OfficialDefaults).WithDefaults(),
             ChatAttachments = (ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults).Normalized(),
+            TextModelCards = ModelSettingsCards.NormalizeText(TextModelCards),
+            VideoModelCards = ModelSettingsCards.NormalizeVideo(VideoModelCards),
             HanhuaPackRoot = CoalesceHanhuaPath(HanhuaPackRoot),
             HanhuaPythonExe = CoalesceHanhuaPath(HanhuaPythonExe),
             HanhuaMitRoot = CoalesceHanhuaPath(HanhuaMitRoot),
@@ -449,6 +459,8 @@ public sealed record LocalChatSettings
                && left.VideoGeneration == right.VideoGeneration
                && left.VideoPromptPhrases == right.VideoPromptPhrases
                && left.ChatAttachments == right.ChatAttachments
+               && ModelSettingsCards.SameText(left.TextModelCards, right.TextModelCards)
+               && ModelSettingsCards.SameVideo(left.VideoModelCards, right.VideoModelCards)
                && string.Equals(left.HanhuaPackRoot, right.HanhuaPackRoot, StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.HanhuaPythonExe, right.HanhuaPythonExe, StringComparison.OrdinalIgnoreCase)
                && string.Equals(left.HanhuaMitRoot, right.HanhuaMitRoot, StringComparison.OrdinalIgnoreCase)
@@ -562,6 +574,8 @@ public sealed record LocalChatSettings
             bits.Add(left.VideoGeneration.RandomSeed ? "视频随机种子" : $"视频种子 {left.VideoGeneration.Seed}");
         if (left.ChatAttachments != right.ChatAttachments)
             bits.Add("聊天附件");
+        if (ModelSettingsCards.UnselectedChanged(left, right))
+            bits.Add("其他模型的设置记录");
         if (left.VideoPromptPhrases != right.VideoPromptPhrases)
             bits.Add("视频模板套话");
         return bits;
@@ -648,8 +662,24 @@ public sealed record LocalChatSettings
             errors.Add($"请求超时过短：最大输出 {MaxOutputTokens} 时建议至少 {minTimeout} 秒，否则长文可能中途超时");
         errors.AddRange((VideoGeneration ?? VideoGenerationSettings.SafeDefaults).Validate());
         errors.AddRange((ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults).Validate());
+        if (ContextSize > 0
+            && !string.IsNullOrWhiteSpace(SelectedTextProfileId)
+            && TextModelCards is not null
+            && TextModelCards.TryGetValue(SelectedTextProfileId, out var selectedCard))
+        {
+            var support = (selectedCard.Support ?? TextModelSettingSupport.Unrestricted).Normalized();
+            if (ContextSize < support.ContextMinimum || ContextSize > support.ContextMaximum)
+                errors.Add($"当前模型上下文必须在 {support.ContextMinimum} 到 {support.ContextMaximum} 之间");
+        }
         return errors;
     }
+
+    /// <summary>
+    /// Copy the selected profiles' saved cards onto the flat fields the rest of the app already reads.
+    /// Profiles without a card leave those fields unchanged.
+    /// </summary>
+    public LocalChatSettings ApplySelectedModelCards()
+        => ModelSettingsCards.ApplySelected(this);
 
     private static void AddRangeError(List<string> errors, int value, int minimum, int maximum, string name)
     {
@@ -700,9 +730,7 @@ public sealed class SettingsStore(string path)
         {
             var settings = JsonSerializer.Deserialize<LocalChatSettings>(File.ReadAllText(Path), JsonOptions)
                 ?? throw new JsonException("设置文件内容为空");
-            var errors = settings.Validate();
-            if (errors.Count > 0) throw new JsonException(string.Join("；", errors));
-            return new(settings with
+            var loaded = settings with
             {
                 StartupModel = StartupModelSelection.Normalize(settings.StartupModel),
                 VideoGeneration = settings.VideoGeneration ?? VideoGenerationSettings.SafeDefaults,
@@ -713,7 +741,11 @@ public sealed class SettingsStore(string path)
                 HanhuaMitRoot = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaMitRoot),
                 HanhuaFillProfileId = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaFillProfileId),
                 HanhuaCloudConfig = LocalChatSettings.CoalesceHanhuaPath(settings.HanhuaCloudConfig),
-            }, null, null);
+            };
+            loaded = loaded.ApplySelectedModelCards();
+            var errors = loaded.Validate();
+            if (errors.Count > 0) throw new JsonException(string.Join("；", errors));
+            return new(loaded, null, null);
         }
         catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)
         {

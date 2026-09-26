@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using QwenLocalChat.Core;
 using Windows.Globalization.NumberFormatting;
@@ -29,6 +30,10 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     private LocalChatSettings _original = LocalChatSettings.SafeDefaults;
     private ModelProfileCatalog? _textProfiles;
     private VideoModelProfileCatalog? _videoProfiles;
+    private Dictionary<string, TextModelSettingsCard> _textCards = new(StringComparer.Ordinal);
+    private Dictionary<string, VideoGenerationSettings> _videoCards = new(StringComparer.Ordinal);
+    private string? _textCardId;
+    private string? _videoCardId;
     private bool _populatingProfiles;
     private bool _isClosing;
     private bool _compositionReady;
@@ -68,9 +73,18 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     {
         _isClosing = false;
         DetachCloseBatch();
-        _original = settings;
         _textProfiles = textProfiles;
         _videoProfiles = videoProfiles;
+        _textCards = ModelSettingsCards.EnsureText(settings, textProfiles);
+        _videoCards = ModelSettingsCards.EnsureVideo(settings, videoProfiles);
+        _textCardId = null;
+        _videoCardId = null;
+        _original = settings with
+        {
+            TextModelCards = ModelSettingsCards.NormalizeText(_textCards),
+            VideoModelCards = ModelSettingsCards.NormalizeVideo(_videoCards),
+        };
+        _original = _original.ApplySelectedModelCards();
         HideDiscardConfirm();
         Populate(settings);
         var kind = SettingsSectionKind.Normalize(section);
@@ -127,6 +141,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         IsHitTestVisible = false;
         Opacity = 0;
         Scrim.Opacity = 0;
+        Scrim.IsHitTestVisible = false;
         ShadowStrip.Opacity = 0;
         if (_compositionReady)
         {
@@ -147,6 +162,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
 
         // Scrim/shadow snap on — no concurrent full-screen opacity storyboard.
         Scrim.Opacity = 1;
+        Scrim.IsHitTestVisible = true;
         ShadowStrip.Opacity = 1;
         visual.Properties.InsertVector3("Translation", new Vector3(ClosedSlideX, 0, 0));
 
@@ -167,6 +183,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
 
         // Drop cheap overlays immediately so only the drawer slides on the compositor.
         Scrim.Opacity = 0;
+        Scrim.IsHitTestVisible = false;
         ShadowStrip.Opacity = 0;
         Opacity = 1;
         PanelShell.Opacity = 1;
@@ -387,8 +404,14 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         LogStatusReadonlyText.Text = settings.SaveChatLogs ? "聊天日志：开启" : "聊天日志：关闭";
         ValidationInfo.IsOpen = false;
         HideDiscardConfirm();
+        _textCardId = SelectedTextProfile?.Id;
+        _videoCardId = SelectedVideoProfile?.Id;
+        if (_textCardId is not null && _textCards.TryGetValue(_textCardId, out var textCard))
+            ApplyTextCard(textCard);
         UpdateTextProfileDetails();
         UpdateVideoProfileDetails();
+        if (_videoCardId is not null && _videoCards.TryGetValue(_videoCardId, out var videoCard))
+            ApplyVideoCard(videoCard);
         _populatingProfiles = false;
         AttachNumberBoxEditDisplay();
     }
@@ -475,9 +498,21 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     public void RefreshTextProfiles(ModelProfileCatalog profiles, string selectedId)
     {
         _textProfiles = profiles;
+        RememberTextCard();
+        foreach (var profile in profiles.Profiles)
+        {
+            if (_textCards.ContainsKey(profile.Id)) continue;
+            var seed = _textCardId is not null && _textCards.TryGetValue(_textCardId, out var current)
+                ? current
+                : TextModelSettingsCard.FromSettings(_original, profile);
+            _textCards[profile.Id] = seed with { Support = TextModelSettingSupport.ForProfile(profile) };
+        }
         _populatingProfiles = true;
         TextModelProfileBox.ItemsSource = profiles.Profiles;
         TextModelProfileBox.SelectedItem = profiles.Resolve(selectedId);
+        _textCardId = selectedId;
+        if (_textCards.TryGetValue(selectedId, out var card))
+            ApplyTextCard(card);
         PopulateHanhuaFillProfile(_original.HanhuaFillProfileId);
         _populatingProfiles = false;
         UpdateTextProfileDetails();
@@ -486,12 +521,23 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     public void RefreshVideoProfiles(VideoModelProfileCatalog profiles, string selectedId)
     {
         _videoProfiles = profiles;
+        RememberVideoCard();
+        foreach (var profile in profiles.Profiles)
+        {
+            if (_videoCards.ContainsKey(profile.Id)) continue;
+            _videoCards[profile.Id] = _videoCardId is not null && _videoCards.TryGetValue(_videoCardId, out var current)
+                ? current
+                : (_original.VideoGeneration ?? VideoGenerationSettings.SafeDefaults).Normalized();
+        }
         _populatingProfiles = true;
         VideoModelProfileBox.ItemsSource = profiles.Profiles;
         VideoModelProfileBox.SelectedItem = profiles.Resolve(selectedId);
+        _videoCardId = selectedId;
         _populatingProfiles = false;
         ApplyVideoCapabilities();
         UpdateVideoProfileDetails();
+        if (_videoCards.TryGetValue(selectedId, out var card))
+            ApplyVideoCard(card);
     }
 
     private void TextImportButton_Click(object sender, RoutedEventArgs e) => TextImportRequested?.Invoke(this, EventArgs.Empty);
@@ -521,6 +567,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     private void TextModelProfileBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_populatingProfiles || SelectedTextProfile is not { } profile) return;
+        RememberTextCard();
         var service = profile.Service;
         ContextSizeBox.Value = service.ContextSize;
         GpuLayersBox.Value = service.GpuLayers;
@@ -532,21 +579,171 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         ModelPathBox.Text = service.ModelPath;
         PortBox.Value = service.Port;
         AutoStartOnDemandToggle.IsOn = service.AutoStartOnDemand;
+        _textCardId = profile.Id;
+        if (!_textCards.TryGetValue(profile.Id, out var card))
+        {
+            card = TextModelSettingsCard.FromSettings(_original, profile).Normalized();
+            _textCards[profile.Id] = card;
+        }
+        ApplyTextCard(card);
         UpdateTextProfileDetails();
     }
 
     private void VideoModelProfileBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_populatingProfiles || SelectedVideoProfile is null) return;
+        if (_populatingProfiles || SelectedVideoProfile is not { } profile) return;
+        RememberVideoCard();
+        _videoCardId = profile.Id;
+        if (!_videoCards.ContainsKey(profile.Id))
+            _videoCards[profile.Id] = (_original.VideoGeneration ?? VideoGenerationSettings.SafeDefaults).Normalized();
         ApplyVideoCapabilities();
         UpdateVideoProfileDetails();
+        ApplyVideoCard(_videoCards[profile.Id]);
     }
 
     private void UpdateTextProfileDetails()
     {
         if (SelectedTextProfile is not { } profile) return;
         TextModelProfileDetails.Text = $"{profile.Adapter}  /  {profile.Service.BindHost}:{profile.Service.Port}  /  API model: {profile.Service.ModelAlias}";
+        if (_textCardId is not null && _textCards.TryGetValue(_textCardId, out var card))
+            WriteTextCardSummary(profile, card.Support ?? TextModelSettingSupport.Unrestricted);
     }
+
+    private void RememberTextCard()
+    {
+        if (_populatingProfiles || _textCardId is null) return;
+        if (!_textCards.TryGetValue(_textCardId, out var existing)) return;
+        _textCards[_textCardId] = ReadTextCard(existing.Support ?? TextModelSettingSupport.Unrestricted);
+    }
+
+    private void RememberVideoCard()
+    {
+        if (_populatingProfiles || _videoCardId is null) return;
+        _videoCards[_videoCardId] = ReadVideoCard();
+    }
+
+    private void ApplyTextCard(TextModelSettingsCard card)
+    {
+        var support = (card.Support ?? TextModelSettingSupport.Unrestricted).Normalized();
+        ContextSizeBox.Minimum = support.ContextMinimum;
+        ContextSizeBox.Maximum = support.ContextMaximum;
+        if (ContextSizeBox.Value < support.ContextMinimum) ContextSizeBox.Value = support.ContextMinimum;
+        if (ContextSizeBox.Value > support.ContextMaximum) ContextSizeBox.Value = support.ContextMaximum;
+        MaxOutputTokensBox.Value = card.MaxOutputTokens;
+        TemperatureBox.Value = SettingsNumberInput.Temperature(card.Temperature);
+        FrequencyPenaltyBox.Value = SettingsNumberInput.OpenAiPenalty(card.FrequencyPenalty);
+        PresencePenaltyBox.Value = SettingsNumberInput.OpenAiPenalty(card.PresencePenalty);
+        RepeatPenaltyBox.Value = SettingsNumberInput.RepeatPenalty(card.RepeatPenalty);
+        DryMultiplierBox.Value = SettingsNumberInput.DryMultiplier(card.DryMultiplier);
+        RepeatLastNBox.Value = card.RepeatLastN;
+        StreamResponsesToggle.IsOn = card.StreamResponses;
+        AutoTightenOutputToggle.IsOn = card.AutoTightenOutputTokens;
+        SegmentedLongFormToggle.IsOn = card.SegmentedLongForm;
+        ClientRepetitionGuardToggle.IsOn = card.ClientRepetitionGuard;
+        RequestTimeoutBox.Value = card.RequestTimeoutSeconds;
+        MaxHistoryRoundsBox.Value = card.MaxHistoryRounds;
+        var attachments = card.EffectiveAttachments();
+        ChatAttachTextToggle.IsOn = attachments.AllowText;
+        ChatAttachImageToggle.IsOn = attachments.AllowImage;
+        ChatAttachAudioToggle.IsOn = attachments.AllowAudio;
+        ChatAttachVideoToggle.IsOn = attachments.AllowVideo;
+        ChatAttachMaxFilesBox.Value = attachments.MaxFiles;
+        ChatAttachMaxKbBox.Value = Math.Max(4, attachments.MaxBytesPerFile / 1024);
+        ChatAttachExtraExtensionsBox.Text = attachments.ExtraExtensions ?? "";
+        ReasoningToggle.Visibility = support.Reasoning ? Visibility.Visible : Visibility.Collapsed;
+        ChatAttachImageToggle.Visibility = support.ImageAttachments ? Visibility.Visible : Visibility.Collapsed;
+        ChatAttachAudioToggle.Visibility = support.AudioAttachments ? Visibility.Visible : Visibility.Collapsed;
+        ChatAttachVideoToggle.Visibility = support.VideoAttachments ? Visibility.Visible : Visibility.Collapsed;
+        if (SelectedTextProfile is { } profile)
+            WriteTextCardSummary(profile, support);
+    }
+
+    private void WriteTextCardSummary(TextModelProfile profile, TextModelSettingSupport support)
+    {
+        var normalized = support.Normalized();
+        var limits = new List<string>
+        {
+            "生成、历史轮数和附件按这个档案单独保存。切换档案后，下面这些设置换成该档案自己的记录。",
+            normalized.Reasoning ? "思考模式可以单独开关。" : "此模型不使用思考模式。",
+        };
+        if (!normalized.ImageAttachments && !normalized.AudioAttachments && !normalized.VideoAttachments)
+            limits.Add("只支持文本附件。");
+        limits.Add($"上下文 {normalized.ContextMinimum}–{normalized.ContextMaximum}。");
+        TextModelSettingsCardTitle.Text = $"{profile.DisplayName} 的设置记录";
+        TextModelSettingsCardSummary.Text = string.Join(string.Empty, limits);
+    }
+
+    private TextModelSettingsCard ReadTextCard(TextModelSettingSupport support)
+    {
+        var normalized = support.Normalized();
+        var attachments = new ChatAttachmentPolicy
+        {
+            AllowText = ChatAttachTextToggle.IsOn,
+            AllowImage = normalized.ImageAttachments && ChatAttachImageToggle.IsOn,
+            AllowAudio = normalized.AudioAttachments && ChatAttachAudioToggle.IsOn,
+            AllowVideo = normalized.VideoAttachments && ChatAttachVideoToggle.IsOn,
+            MaxFiles = Whole(ChatAttachMaxFilesBox),
+            MaxBytesPerFile = Whole(ChatAttachMaxKbBox) * 1024,
+            ExtraExtensions = ChatAttachExtraExtensionsBox.Text ?? "",
+        };
+        return new TextModelSettingsCard
+        {
+            MaxOutputTokens = Whole(MaxOutputTokensBox),
+            Temperature = SettingsNumberInput.Temperature(TemperatureBox.Text, TemperatureBox.Value),
+            FrequencyPenalty = SettingsNumberInput.OpenAiPenalty(FrequencyPenaltyBox.Text, FrequencyPenaltyBox.Value),
+            PresencePenalty = SettingsNumberInput.OpenAiPenalty(PresencePenaltyBox.Text, PresencePenaltyBox.Value),
+            RepeatPenalty = SettingsNumberInput.RepeatPenalty(RepeatPenaltyBox.Text, RepeatPenaltyBox.Value),
+            DryMultiplier = SettingsNumberInput.DryMultiplier(DryMultiplierBox.Text, DryMultiplierBox.Value),
+            RepeatLastN = Whole(RepeatLastNBox),
+            StreamResponses = StreamResponsesToggle.IsOn,
+            AutoTightenOutputTokens = AutoTightenOutputToggle.IsOn,
+            SegmentedLongForm = SegmentedLongFormToggle.IsOn,
+            ClientRepetitionGuard = ClientRepetitionGuardToggle.IsOn,
+            RequestTimeoutSeconds = Whole(RequestTimeoutBox),
+            MaxHistoryRounds = Whole(MaxHistoryRoundsBox),
+            ChatAttachments = attachments,
+            Support = normalized,
+        }.Normalized();
+    }
+
+    private void ApplyVideoCard(VideoGenerationSettings card)
+    {
+        var value = card.Normalized();
+        if (SelectedVideoProfile is { } profile)
+        {
+            var capabilities = profile.Capabilities;
+            VideoWidthBox.Value = Math.Clamp(value.Width, capabilities.MinimumDimension, capabilities.MaximumDimension);
+            VideoHeightBox.Value = Math.Clamp(value.Height, capabilities.MinimumDimension, capabilities.MaximumDimension);
+            VideoDurationBox.Value = Math.Clamp(value.DurationSeconds, capabilities.MinimumDurationSeconds, capabilities.MaximumDurationSeconds);
+            VideoStepsBox.Value = Math.Clamp(value.Steps, capabilities.MinimumSteps, capabilities.MaximumSteps);
+            VideoModelSettingsCardTitle.Text = $"{profile.DisplayName} 的设置记录";
+        }
+        else
+        {
+            VideoWidthBox.Value = value.Width;
+            VideoHeightBox.Value = value.Height;
+            VideoDurationBox.Value = value.DurationSeconds;
+            VideoStepsBox.Value = value.Steps;
+        }
+        VideoSeedBox.Value = value.Seed;
+        VideoRandomSeedToggle.IsOn = value.RandomSeed;
+        SelectTaggedItem(VideoOutputFormatBox, value.OutputFormat);
+        SelectTaggedItem(VideoCodecBox, value.VideoCodec);
+        VideoModelSettingsCardSummary.Text = "分辨率、时长、步数和种子按这个视频档案单独保存。切换档案后，生成默认值换成该档案自己的记录。";
+    }
+
+    private VideoGenerationSettings ReadVideoCard()
+        => new VideoGenerationSettings
+        {
+            Width = Whole(VideoWidthBox),
+            Height = Whole(VideoHeightBox),
+            DurationSeconds = Whole(VideoDurationBox),
+            Steps = Whole(VideoStepsBox),
+            Seed = Whole(VideoSeedBox),
+            RandomSeed = VideoRandomSeedToggle.IsOn,
+            OutputFormat = ReadTaggedItem(VideoOutputFormatBox, "mp4"),
+            VideoCodec = ReadTaggedItem(VideoCodecBox, "auto"),
+        }.Normalized();
 
     private void UpdateVideoProfileDetails()
     {
@@ -648,7 +845,10 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         => box.SelectedItem is ComboBoxItem { Tag: string tag } ? tag : fallback;
 
     private LocalChatSettings BuildDraft()
-        => _original with
+    {
+        RememberTextCard();
+        RememberVideoCard();
+        return _original with
         {
             MaxOutputTokens = Whole(MaxOutputTokensBox),
             Temperature = SettingsNumberInput.Temperature(TemperatureBox.Text, TemperatureBox.Value),
@@ -707,7 +907,10 @@ public sealed partial class RuntimeSettingsPanel : UserControl
                 VideoCodec = ReadTaggedItem(VideoCodecBox, "auto"),
             },
             VideoPromptPhrases = ReadPhraseEditors(),
+            TextModelCards = ModelSettingsCards.NormalizeText(_textCards),
+            VideoModelCards = ModelSettingsCards.NormalizeVideo(_videoCards),
         };
+    }
 
     private VideoModelProfile BuildEditedVideoProfile()
     {
@@ -822,10 +1025,14 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         HideDiscardConfirm();
         if (CurrentSection == SettingsSectionKind.Video)
         {
-            Populate(BuildDraft() with
+            var draft = BuildDraft();
+            if (_videoCardId is not null)
+                _videoCards[_videoCardId] = VideoGenerationSettings.SafeDefaults;
+            Populate(draft with
             {
                 VideoGeneration = VideoGenerationSettings.SafeDefaults,
                 VideoPromptPhrases = VideoPromptTemplatePhrases.OfficialDefaults,
+                VideoModelCards = ModelSettingsCards.NormalizeVideo(_videoCards),
             });
             return;
         }
@@ -841,7 +1048,8 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             });
             return;
         }
-        Populate(LocalChatSettings.ResetToDefaults() with
+        var preservedVideo = BuildDraft();
+        var reset = LocalChatSettings.ResetToDefaults() with
         {
             UseMemos = _original.UseMemos,
             SaveChatLogs = _original.SaveChatLogs,
@@ -857,14 +1065,37 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             AutoStartOnDemand = _original.AutoStartOnDemand,
             SelectedTextProfileId = _original.SelectedTextProfileId,
             StartupModel = _original.StartupModel,
-            SelectedVideoProfileId = BuildDraft().SelectedVideoProfileId,
+            SelectedVideoProfileId = preservedVideo.SelectedVideoProfileId,
             VideoGeneration = BuildDraft().VideoGeneration,
-            VideoPromptPhrases = BuildDraft().VideoPromptPhrases,
-        });
+            VideoPromptPhrases = preservedVideo.VideoPromptPhrases,
+            TextModelCards = preservedVideo.TextModelCards,
+            VideoModelCards = preservedVideo.VideoModelCards,
+        };
+        if (SelectedTextProfile is { } profile)
+        {
+            var support = _textCards.TryGetValue(profile.Id, out var existing)
+                ? existing.Support
+                : TextModelSettingSupport.ForProfile(profile);
+            _textCards[profile.Id] = TextModelSettingsCard.FromSettings(reset, profile).Normalized() with
+            {
+                Support = (support ?? TextModelSettingSupport.Unrestricted).Normalized(),
+            };
+        }
+        Populate(reset);
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
+        => RequestClose();
+
+    private void Scrim_Tapped(object sender, TappedRoutedEventArgs e)
     {
+        e.Handled = true;
+        RequestClose();
+    }
+
+    private void RequestClose()
+    {
+        if (_isClosing) return;
         if (!IsDirty())
         {
             CloseRequested?.Invoke(this, EventArgs.Empty);

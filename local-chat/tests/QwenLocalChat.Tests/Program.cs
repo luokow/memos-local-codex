@@ -195,6 +195,7 @@ var tests = new (string Name, Action Body)[]
     ("video-media-reference-video-and-audio-roundtrip", VideoMediaReferenceVideoAndAudioRoundTrip),
     ("model-profile-catalog-selects-config", ModelProfileCatalogSelectsConfig),
     ("model-profile-catalog-update-roundtrip", ModelProfileCatalogUpdateRoundTrip),
+    ("model-settings-cards-follow-the-selected-profile", ModelSettingsCardsFollowTheSelectedProfile),
     ("model-profile-import-discovers-one-gguf-and-persists-unique-id", ModelProfileImportDiscoversOneGgufAndPersistsUniqueId),
     ("video-profile-catalog-selects-and-validates", VideoProfileCatalogSelectsAndValidates),
     ("video-profile-catalog-add-replace-roundtrip", VideoProfileCatalogAddReplaceRoundTrip),
@@ -1439,6 +1440,106 @@ static void SettingsRoundTrip()
         var onDemandDisabled = combined with { AutoStartOnDemand = false };
         Equal(false, onDemandDisabled.ApplyToModelService(new ModelServiceConfig { AutoStartOnDemand = true }).AutoStartOnDemand,
             "the settings view must write the on-demand policy back to shared config");
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+}
+
+static void ModelSettingsCardsFollowTheSelectedProfile()
+{
+    var fast = new TextModelProfile("fast", "Fast", "llama.cpp-openai", new ModelServiceConfig
+    {
+        SchemaVersion = 1,
+        BindHost = "127.0.0.1",
+        Port = 18135,
+        ServerExecutable = "llama/bin/llama-server.exe",
+        ModelPath = "models/fast.gguf",
+        ModelAlias = "fast-alias",
+        ContextSize = 4096,
+        GpuLayers = 1,
+        ParallelSlots = 1,
+        ReasoningEnabled = false,
+        UseJinja = true,
+        StartupTimeoutSeconds = 30,
+        AutoStartOnDemand = true,
+    });
+    var bonsai = new TextModelProfile("bonsai", "Bonsai", "llama.cpp-openai", new ModelServiceConfig
+    {
+        SchemaVersion = 1,
+        BindHost = "127.0.0.1",
+        Port = 18135,
+        ServerExecutable = "llama-prism/bin/llama-server.exe",
+        ModelPath = "models/Ternary-Bonsai-2-27B.gguf",
+        ModelAlias = "qwen3.8:27b-uncensored-bonsai",
+        ContextSize = 8192,
+        GpuLayers = 99,
+        ParallelSlots = 1,
+        ReasoningEnabled = true,
+        UseJinja = true,
+        StartupTimeoutSeconds = 180,
+        AutoStartOnDemand = true,
+    });
+    var catalog = new ModelProfileCatalog(1, "fast", [fast, bonsai]);
+    var settings = LocalChatSettings.SafeDefaults with
+    {
+        SelectedTextProfileId = "fast",
+        Temperature = 0.7,
+        MaxOutputTokens = 4096,
+        MaxHistoryRounds = 50,
+    };
+    var cards = ModelSettingsCards.EnsureText(settings, catalog);
+    Equal(0.7, cards["bonsai"].Temperature, "a profile without a saved card must start from the current settings");
+    Equal(8192, cards["bonsai"].Support.ContextMaximum, "the ternary pack must keep its own context ceiling");
+    Equal(false, cards["bonsai"].Support.ImageAttachments, "the ternary pack must not offer image attachments");
+    Equal(true, cards["bonsai"].Support.Reasoning, "the ternary pack must keep the thinking switch");
+    Equal(32768, cards["fast"].Support.ContextMaximum, "an ordinary profile must keep the existing context range");
+    Equal(true, cards["fast"].Support.ImageAttachments, "an ordinary profile must keep the existing attachment controls");
+
+    var edited = new Dictionary<string, TextModelSettingsCard>(cards, StringComparer.Ordinal);
+    edited["bonsai"] = cards["bonsai"] with { Temperature = 0.2, MaxOutputTokens = 1024 };
+    var switched = (settings with
+    {
+        SelectedTextProfileId = "bonsai",
+        TextModelCards = edited,
+        ContextSize = 8192,
+    }).ApplySelectedModelCards();
+    Equal(0.2, switched.Temperature, "selecting a profile must load that profile's saved temperature");
+    Equal(1024, switched.MaxOutputTokens, "selecting a profile must load that profile's saved output cap");
+    Equal(50, switched.MaxHistoryRounds, "fields stored on the card must stay with that model");
+
+    var back = (switched with { SelectedTextProfileId = "fast" }).ApplySelectedModelCards();
+    Equal(0.7, back.Temperature, "switching back must restore the other model's card");
+    Equal(4096, back.MaxOutputTokens, "switching back must restore the other model's output cap");
+    Equal(true, (switched with { ContextSize = 9000 }).Validate().Any(error => error.Contains("上下文", StringComparison.Ordinal)),
+        "the selected model's card must reject a context above its own ceiling");
+
+    var videoCards = new Dictionary<string, VideoGenerationSettings>(StringComparer.Ordinal)
+    {
+        ["wide"] = VideoGenerationSettings.SafeDefaults with { Width = 864, Height = 480 },
+        ["square"] = VideoGenerationSettings.SafeDefaults with { Width = 512, Height = 512 },
+    };
+    var wide = (LocalChatSettings.SafeDefaults with { SelectedVideoProfileId = "wide", VideoModelCards = videoCards }).ApplySelectedModelCards();
+    var square = (wide with { SelectedVideoProfileId = "square" }).ApplySelectedModelCards();
+    Equal(864, wide.VideoGeneration.Width, "the selected video profile must keep its own width");
+    Equal(512, square.VideoGeneration.Width, "switching video profiles must load that profile's width");
+    Equal(480, (square with { SelectedVideoProfileId = "wide" }).ApplySelectedModelCards().VideoGeneration.Height,
+        "switching back must restore the first video profile's height");
+
+    var directory = Path.Combine(Path.GetTempPath(), $"model-cards-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(directory);
+    try
+    {
+        var store = new SettingsStore(Path.Combine(directory, "settings.json"));
+        store.Save(switched);
+        var loaded = store.Load().Settings;
+        Equal(0.2, loaded.Temperature, "reloading must apply the selected model's card");
+        Equal(1024, loaded.MaxOutputTokens, "reloading must keep the selected model's output cap");
+        store.Save(LocalChatSettings.SafeDefaults with { SelectedTextProfileId = "fast", Temperature = 0.4 });
+        var plain = store.Load().Settings;
+        Equal(0.4, plain.Temperature, "settings without cards must keep the flat values");
+        Equal(true, plain.TextModelCards is null || plain.TextModelCards.Count == 0, "a legacy settings file must not grow an empty card map");
     }
     finally
     {

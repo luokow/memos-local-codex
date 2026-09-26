@@ -6,7 +6,7 @@
 
     <Grid x:Name="SettingsRoot">
         <!-- Dimmed scrim behind the drawer -->
-        <Rectangle x:Name="Scrim" Fill="#CC000000" Opacity="0" IsHitTestVisible="False" />
+        <Rectangle x:Name="Scrim" AutomationProperties.AutomationId="SettingsScrim" AutomationProperties.Name="点击左侧空白关闭设置" Fill="#CC000000" Opacity="0" IsHitTestVisible="False" Tapped="Scrim_Tapped" />
 
         <!-- Soft left shadow strip so the drawer lifts off the chat surface -->
         <Rectangle x:Name="ShadowStrip" Width="24" HorizontalAlignment="Right" Margin="0,0,500,0" IsHitTestVisible="False" Opacity="0">
@@ -127,6 +127,12 @@
                                     SelectionChanged="TextModelProfileBox_SelectionChanged" />
                                 <TextBlock Text="首次发送时会按需启动；也可先启动检查服务。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
                                 <TextBlock x:Name="TextModelProfileDetails" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                <Border x:Name="TextSettingsRecordHost" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock x:Name="TextModelSettingsCardTitle" Text="此模型的设置记录" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="TextModelSettingsCardSummary" AutomationProperties.AutomationId="TextModelSettingsCardSummary" Text="生成、历史轮数和附件按当前档案单独保存。切换档案后，下面的设置换成该档案自己的记录。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
                                 <TextBlock x:Name="TextModelOperationStatus" AutomationProperties.AutomationId="TextModelOperationStatus" Style="{StaticResource SettingsSectionHintStyle}" />
                                 <Grid ColumnSpacing="8">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -306,6 +312,12 @@
                                         SelectionChanged="VideoModelProfileBox_SelectionChanged" />
                                     <TextBlock Text="首次开始生成时会按需启动；也可先启动检查服务。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
                                     <TextBlock x:Name="VideoModelProfileDetails" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <Border x:Name="VideoSettingsRecordHost" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock x:Name="VideoModelSettingsCardTitle" Text="此模型的设置记录" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="VideoModelSettingsCardSummary" AutomationProperties.AutomationId="VideoModelSettingsCardSummary" Text="分辨率、时长、步数和种子按当前视频档案单独保存。切换档案后，生成默认值换成该档案自己的记录。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
                                     <TextBlock x:Name="VideoModelOperationStatus" AutomationProperties.AutomationId="VideoModelOperationStatus" Style="{StaticResource SettingsSectionHintStyle}" />
                                     <Grid ColumnSpacing="8">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
