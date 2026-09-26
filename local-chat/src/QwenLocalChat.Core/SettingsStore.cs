@@ -145,6 +145,28 @@ public static class StartupModelSelection
         => value is None or Video ? value : Text;
 }
 
+public static class StartupPageSelection
+{
+    public const string Chat = "chat";
+    public const string Video = "video";
+    public const string Hanhua = "hanhua";
+
+    public static string Normalize(string? value)
+        => value is Video or Hanhua ? value : Chat;
+
+    /// <summary>
+    /// The saved page wins. Resumable hanhua or video work only explains itself; it does not replace the page.
+    /// </summary>
+    public static string Resolve(string? savedPage, bool hanhuaCanResume, bool videoCanResume)
+    {
+        _ = hanhuaCanResume || videoCanResume;
+        return Normalize(savedPage);
+    }
+
+    public static bool ResumeInterruptedVideo(string? savedPage, bool videoCanResume)
+        => Normalize(savedPage) == Video && videoCanResume;
+}
+
 public static class SettingsSectionKind
 {
     public const string Text = "text";
@@ -194,9 +216,6 @@ public sealed record LocalChatSettings
     public const double DefaultRepeatPenalty = 1.0;
     public const int DefaultRepeatLastN = 64;
     public const double DefaultDryMultiplier = 0;
-    public const double DefaultDryBase = 1.75;
-    public const int DefaultDryAllowedLength = 2;
-    public const int DefaultDryPenaltyLastN = -1;
 
     public LocalChatSettings() { }
 
@@ -223,6 +242,9 @@ public sealed record LocalChatSettings
 
     [JsonPropertyName("startup_model")]
     public string StartupModel { get; init; } = StartupModelSelection.Text;
+
+    [JsonPropertyName("startup_page")]
+    public string StartupPage { get; init; } = StartupPageSelection.Chat;
 
     /// <summary>Per-request generation cap.</summary>
     [JsonPropertyName("max_output_tokens")]
@@ -401,6 +423,7 @@ public sealed record LocalChatSettings
             RepeatPenalty = SettingsNumberInput.RepeatPenalty(RepeatPenalty),
             DryMultiplier = SettingsNumberInput.DryMultiplier(DryMultiplier),
             StartupModel = StartupModelSelection.Normalize(StartupModel),
+            StartupPage = StartupPageSelection.Normalize(StartupPage),
             VideoGeneration = (VideoGeneration ?? VideoGenerationSettings.SafeDefaults).Normalized(),
             VideoPromptPhrases = (VideoPromptPhrases ?? VideoPromptTemplatePhrases.OfficialDefaults).WithDefaults(),
             ChatAttachments = (ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults).Normalized(),
@@ -425,6 +448,7 @@ public sealed record LocalChatSettings
                && string.Equals(left.SelectedTextProfileId, right.SelectedTextProfileId, StringComparison.Ordinal)
                && string.Equals(left.SelectedVideoProfileId, right.SelectedVideoProfileId, StringComparison.Ordinal)
                && string.Equals(left.StartupModel, right.StartupModel, StringComparison.Ordinal)
+               && string.Equals(left.StartupPage, right.StartupPage, StringComparison.Ordinal)
                && left.Temperature == right.Temperature
                && left.FrequencyPenalty == right.FrequencyPenalty
                && left.PresencePenalty == right.PresencePenalty
@@ -556,6 +580,13 @@ public sealed record LocalChatSettings
                 StartupModelSelection.Video => "启动客户端时开启视频模型",
                 StartupModelSelection.None => "启动客户端时不开启模型",
                 _ => "启动客户端时开启文本模型",
+            });
+        if (!string.Equals(left.StartupPage, right.StartupPage, StringComparison.Ordinal))
+            bits.Add(left.StartupPage switch
+            {
+                StartupPageSelection.Video => "打开后显示视频",
+                StartupPageSelection.Hanhua => "打开后显示汉化",
+                _ => "打开后显示聊天",
             });
         if (!string.Equals(left.SelectedVideoProfileId, right.SelectedVideoProfileId, StringComparison.Ordinal))
             bits.Add("视频模型档案");
@@ -733,6 +764,7 @@ public sealed class SettingsStore(string path)
             var loaded = settings with
             {
                 StartupModel = StartupModelSelection.Normalize(settings.StartupModel),
+                StartupPage = StartupPageSelection.Normalize(settings.StartupPage),
                 VideoGeneration = settings.VideoGeneration ?? VideoGenerationSettings.SafeDefaults,
                 VideoPromptPhrases = (settings.VideoPromptPhrases ?? VideoPromptTemplatePhrases.OfficialDefaults).WithDefaults(),
                 ChatAttachments = settings.ChatAttachments ?? ChatAttachmentPolicy.SafeDefaults,

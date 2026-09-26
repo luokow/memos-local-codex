@@ -33,6 +33,7 @@ public enum HanhuaJobStatus
     Succeeded,
     Failed,
     Interrupted,
+    Cancelled,
 }
 
 public enum HanhuaGpuNeed

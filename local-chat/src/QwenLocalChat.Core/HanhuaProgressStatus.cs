@@ -169,7 +169,7 @@ public static class HanhuaProgressStatus
     {
         HanhuaJobStatus.Succeeded => "completed",
         HanhuaJobStatus.Failed => "failed",
-        HanhuaJobStatus.Interrupted or HanhuaJobStatus.Cancelling => "cancelled",
+        HanhuaJobStatus.Interrupted or HanhuaJobStatus.Cancelling or HanhuaJobStatus.Cancelled => "cancelled",
         HanhuaJobStatus.Queued => "queued",
         _ => "in_progress",
     };

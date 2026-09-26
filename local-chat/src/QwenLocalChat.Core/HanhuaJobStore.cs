@@ -76,7 +76,7 @@ public sealed class HanhuaJobStore
         {
             var snapshot = Load();
             var running = snapshot.Jobs.FirstOrDefault(job => job.Status is HanhuaJobStatus.Running or HanhuaJobStatus.Cancelling);
-            if (running is null) return snapshot.Active;
+            if (running is null) return null;
             var interrupted = running with
             {
                 Status = HanhuaJobStatus.Interrupted,

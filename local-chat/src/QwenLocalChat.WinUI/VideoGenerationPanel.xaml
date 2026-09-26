@@ -55,7 +55,7 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock x:Name="VideoPromptLabel" Text="视频提示词" Style="{StaticResource ComposerTitleTextStyle}" VerticalAlignment="Center" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <ComboBox
                         x:Name="VideoConditioningModeBox"
                         AutomationProperties.AutomationId="VideoConditioningMode"
@@ -68,7 +68,7 @@
                     <Button x:Name="ExpandVideoInputButton" AutomationProperties.AutomationId="ExpandVideoInputButton" AutomationProperties.Name="展开视频提示词" Content="展开" Click="ExpandVideoInputButton_Click" Style="{StaticResource ToolbarButtonStyle}" />
                 </StackPanel>
 
-                <Grid Grid.Row="1" Grid.ColumnSpan="2" RowSpacing="4">
+                <Grid Grid.Row="1" Grid.Column="0" RowSpacing="4">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
@@ -139,6 +139,9 @@
                         </ListView.ItemTemplate>
                     </ListView>
                 </Grid>
+                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <Button x:Name="StartVideoButton" AutomationProperties.AutomationId="StartVideoButton" AutomationProperties.Name="生成视频" Content="生成视频" Click="StartVideoButton_Click" Style="{StaticResource PrimaryButtonStyle}" />
+                </StackPanel>
 
                 <!-- Only expands when an image mode is selected; text mode stays chat-height. -->
                 <Border x:Name="VideoMediaCard" Grid.Row="2" Grid.ColumnSpan="2" Background="Transparent" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="0,4,0,0" Visibility="Collapsed">
@@ -271,12 +274,12 @@
             </Grid>
         </Border>
 
-        <Border x:Name="VideoCommandSurface" Grid.Row="2" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,8">
+        <Border x:Name="VideoCommandSurface" Grid.Row="2" Style="{StaticResource CommandSurfaceStyle}">
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                    <TextBox x:Name="VideoJobStatus" AutomationProperties.AutomationId="VideoJobStatus" AutomationProperties.Name="视频任务状态" Text="等待开始" IsReadOnly="True" TextWrapping="NoWrap" AcceptsReturn="False" MinHeight="0" MaxHeight="22" Padding="0" Margin="0" VerticalAlignment="Center" VerticalContentAlignment="Center" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Microsoft YaHei UI" FontSize="13" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
-                    <ProgressBar x:Name="VideoJobProgress" Width="120" Height="6" MinHeight="6" AutomationProperties.AutomationId="VideoJobProgress" IsIndeterminate="False" VerticalAlignment="Center" Visibility="Collapsed" />
+                    <TextBox x:Name="VideoJobStatus" AutomationProperties.AutomationId="VideoJobStatus" AutomationProperties.Name="视频任务状态" Text="等待开始" IsReadOnly="True" TextWrapping="NoWrap" Style="{StaticResource CommandStatusTextBoxStyle}" />
+                    <ProgressBar x:Name="VideoJobProgress" AutomationProperties.AutomationId="VideoJobProgress" IsIndeterminate="False" Style="{StaticResource CommandProgressBarStyle}" Visibility="Collapsed" />
                     <TextBlock x:Name="VideoJobPercentText" AutomationProperties.AutomationId="VideoJobPercentText" AutomationProperties.Name="视频生成百分比" Text="0%" Visibility="Collapsed" Style="{StaticResource ComposerMetaTextStyle}" VerticalAlignment="Center" />
                     <Button x:Name="VideoErrorDetailsButton" AutomationProperties.AutomationId="VideoErrorDetailsButton" AutomationProperties.Name="查看完整视频错误" Content="查看详情" Click="VideoErrorDetailsButton_Click" Visibility="Collapsed" VerticalAlignment="Center" Style="{StaticResource ToolbarButtonStyle}" />
                 </StackPanel>
@@ -293,7 +296,6 @@
                     <Button x:Name="ResumeVideoButton" AutomationProperties.AutomationId="ResumeVideoButton" AutomationProperties.Name="继续上次视频任务" Content="继续上次" Click="ResumeVideoButton_Click" Visibility="Collapsed" Style="{StaticResource ToolbarButtonStyle}" />
                     <Button x:Name="RetryVideoButton" AutomationProperties.AutomationId="RetryVideoButton" AutomationProperties.Name="失败后重试视频生成" Content="重试" Click="RetryVideoButton_Click" Visibility="Collapsed" Style="{StaticResource ToolbarButtonStyle}" />
                     <Button x:Name="CancelVideoButton" AutomationProperties.AutomationId="CancelVideoButton" AutomationProperties.Name="取消视频生成" Content="取消" Click="CancelVideoButton_Click" IsEnabled="False" Visibility="Collapsed" Style="{StaticResource ToolbarButtonStyle}" />
-                    <Button x:Name="StartVideoButton" AutomationProperties.AutomationId="StartVideoButton" AutomationProperties.Name="生成视频" Content="生成视频" Click="StartVideoButton_Click" Style="{StaticResource VideoPrimaryButtonStyle}" />
                 </StackPanel>
             </Grid>
         </Border>

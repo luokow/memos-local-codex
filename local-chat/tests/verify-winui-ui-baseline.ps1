@@ -383,9 +383,9 @@ $modeBox = $videoPanel.SelectSingleNode("//xaml:ComboBox[@x:Name='VideoCondition
 if ($null -eq $modeBox) {
     throw 'Conditioning mode ComboBox is missing.'
 }
-$modeInTitleStack = $videoComposer.SelectSingleNode(".//xaml:StackPanel[@Grid.Column='1']//xaml:ComboBox[@x:Name='VideoConditioningModeBox']", $videoNs)
+$modeInTitleStack = $videoComposer.SelectSingleNode(".//xaml:StackPanel[@Grid.ColumnSpan='2']//xaml:ComboBox[@x:Name='VideoConditioningModeBox']", $videoNs)
 if ($null -eq $modeInTitleStack) {
-    throw 'Conditioning mode must sit on the composer title row like chat metadata.'
+    throw 'Conditioning mode must sit on the composer title row like chat metadata, without widening the generate column.'
 }
 $videoJobParametersCard = $videoComposer.SelectSingleNode(".//xaml:Border[@x:Name='VideoJobParametersCard']", $videoNs)
 if ($null -eq $videoJobParametersCard) { throw 'Video composer this-job parameters must keep a dedicated disclosure region.' }
@@ -427,7 +427,7 @@ if ($mainPageSource -notmatch 'NoticeText\.Visibility\s*=\s*chat\s*\?\s*Visibili
 $rebuildThenAnchor = [regex]::Match($mainPageSource, 'RebuildVisibleTranscriptFromSession\(gen\.Session, liveGen:\s*null\);[\s\S]{0,200}RestoreQuestionAnchorAfterRebuild').Success -and
     [regex]::Match($mainPageSource, 'RestoreQuestionAnchorAfterRebuild[\s\S]{0,1000}ScrollTranscriptToQuestion').Success
 if (-not $rebuildThenAnchor) { throw 'Reply completion must scroll to the rebuilt question entry after canonical transcript rebuild.' }
-foreach ($automationId in @('TextImportButton', 'ReleaseTextModelButton', 'VideoImportButton', 'ReleaseVideoModelButton', 'StartupModelSetting')) {
+foreach ($automationId in @('TextImportButton', 'ReleaseTextModelButton', 'VideoImportButton', 'ReleaseVideoModelButton', 'StartupModelSetting', 'StartupPageSetting')) {
     $node = $settingsPanel.SelectSingleNode("//*[@AutomationProperties.AutomationId='$automationId']", $settingsNs)
     if ($null -eq $node) { throw "Required model-card control is missing: $automationId" }
 }
@@ -459,6 +459,16 @@ if ($mainPageSource -notmatch 'ApplyStartupModelSelectionAsync' -or
     $mainPageSource -notmatch 'StartupModelSelection\.None') {
     throw 'Client startup must route the persisted text/video/none selection.'
 }
+if ($mainPageSource -notmatch 'StartupPageSelection\.Resolve' -or
+    $settingsPanelSource -notmatch 'StartupPage\s*=\s*ReadStartupPage\(\)') {
+    throw 'Client startup must open the page saved in settings.'
+}
+if ($mainPageSource -match 'HasInterruptedWork\)\s*\{[^}]*ModeSelector') {
+    throw 'Interrupted hanhua or video work must not replace the saved startup page.'
+}
+if ($settingsPanelSource -notmatch 'StartupPage\s*=\s*_original\.StartupPage') {
+    throw 'Resetting text settings must keep the saved startup page.'
+}
 foreach ($summaryName in @('TextModelSummaryText', 'VideoModelSummaryText')) {
     $summary = $mainPage.SelectSingleNode("//xaml:TextBlock[@x:Name='$summaryName']", $pageNs)
     if ($null -eq $summary) { throw "Mode toolbar must expose the selected model identity: $summaryName" }
@@ -466,13 +476,22 @@ foreach ($summaryName in @('TextModelSummaryText', 'VideoModelSummaryText')) {
 }
 $videoProgress = $videoPanel.SelectSingleNode("//xaml:ProgressBar[@x:Name='VideoJobProgress']", $videoNs)
 Require-Equal 'Collapsed' $videoProgress.Visibility 'Idle video progress must not occupy a visible line.'
+$commandSurfaceStyle = $appXaml.SelectSingleNode("//xaml:Style[@x:Key='CommandSurfaceStyle']", $appNs)
+if ($null -eq $commandSurfaceStyle) { throw 'Chat, video, and hanhua footers must share CommandSurfaceStyle.' }
+Require-Equal '{StaticResource RaisedBrush}' $commandSurfaceStyle.SelectSingleNode("xaml:Setter[@Property='Background']", $appNs).Value 'Command surface must separate itself from the empty canvas.'
+Require-Equal '1' $commandSurfaceStyle.SelectSingleNode("xaml:Setter[@Property='BorderThickness']", $appNs).Value 'Command surface must retain one quiet boundary.'
+Require-Equal '12' $commandSurfaceStyle.SelectSingleNode("xaml:Setter[@Property='CornerRadius']", $appNs).Value 'Command surface corner radius drifted.'
+Require-Equal '12,8' $commandSurfaceStyle.SelectSingleNode("xaml:Setter[@Property='Padding']", $appNs).Value 'Command surface padding must follow the compact 4px-grid rhythm.'
 $videoCommandSurface = $videoPanel.SelectSingleNode("//xaml:Border[@x:Name='VideoCommandSurface']", $videoNs)
 if ($null -eq $videoCommandSurface) { throw 'Video footer must present status and actions as one intentional command surface.' }
 Require-Equal '2' $videoCommandSurface.Attributes['Grid.Row'].Value 'Video command surface must occupy the shared footer row.'
-Require-Equal '{StaticResource RaisedBrush}' $videoCommandSurface.Background 'Video command surface must separate itself from the empty canvas.'
-Require-Equal '1' $videoCommandSurface.BorderThickness 'Video command surface must retain one quiet boundary.'
-Require-Equal '12' $videoCommandSurface.CornerRadius 'Video command surface corner radius drifted.'
-Require-Equal '12,8' $videoCommandSurface.Padding 'Video command surface padding must follow the compact 4px-grid rhythm.'
+Require-Equal '{StaticResource CommandSurfaceStyle}' $videoCommandSurface.Style 'Video footer must use the shared command surface.'
+$chatCommandSurface = $mainPage.SelectSingleNode("//xaml:Border[@x:Name='ChatFooterHost']", $pageNs)
+if ($null -eq $chatCommandSurface) { throw 'Chat footer must use the same command surface as video and hanhua.' }
+Require-Equal '{StaticResource CommandSurfaceStyle}' $chatCommandSurface.Style 'Chat footer must use the shared command surface.'
+$hanhuaCommandSurface = $hanhuaPanel.SelectSingleNode("//xaml:Border[@x:Name='HanhuaCommandSurface']", $hanhuaNs)
+if ($null -eq $hanhuaCommandSurface) { throw 'Hanhua footer must use the same command surface as chat and video.' }
+Require-Equal '{StaticResource CommandSurfaceStyle}' $hanhuaCommandSurface.Style 'Hanhua footer must use the shared command surface.'
 if ($videoProgress.SelectSingleNode("ancestor::xaml:Border[@x:Name='VideoCommandSurface']", $videoNs) -ne $videoCommandSurface) {
     throw 'Busy progress must remain inside the unified video command surface.'
 }
@@ -489,13 +508,34 @@ if ($videoSettings.SelectSingleNode("ancestor::xaml:Border[@x:Name='VideoCommand
     throw 'Video settings must align with chat settings in the bottom-right action surface.'
 }
 $startVideo = $videoPanel.SelectSingleNode("//xaml:Button[@x:Name='StartVideoButton']", $videoNs)
-Require-Equal '{StaticResource VideoPrimaryButtonStyle}' $startVideo.Style 'Generate action must use the compact primary video style.'
-foreach ($actionName in @('VideoSettingsButton', 'OpenVideoOutputButton', 'CancelVideoButton', 'StartVideoButton')) {
+Require-Equal '{StaticResource PrimaryButtonStyle}' $startVideo.Style 'Generate action must use the same primary style as chat send and hanhua start.'
+if ($startVideo.SelectSingleNode("ancestor::xaml:Border[@x:Name='VideoCommandSurface']", $videoNs) -eq $videoCommandSurface) {
+    throw 'Generate action belongs on the composer body row, beside the prompt.'
+}
+foreach ($actionName in @('VideoSettingsButton', 'OpenVideoOutputButton', 'CancelVideoButton')) {
     $action = $videoPanel.SelectSingleNode("//xaml:Button[@x:Name='$actionName']", $videoNs)
     if ($action.SelectSingleNode("ancestor::xaml:Border[@x:Name='VideoCommandSurface']", $videoNs) -ne $videoCommandSurface) {
         throw "Video action '$actionName' must belong to the unified command surface."
     }
 }
+function Assert-ComposerPrimary([System.Xml.XmlElement]$button, [string]$label) {
+    Require-Equal '{StaticResource PrimaryButtonStyle}' $button.Style "$label must use the shared composer primary style."
+    $parent = $button.ParentNode
+    Require-Equal 'StackPanel' $parent.LocalName "$label must sit in the composer action stack."
+    Require-Equal '1' $parent.Attributes['Grid.Row'].Value "$label must occupy the composer editor row."
+    Require-Equal '1' $parent.Attributes['Grid.Column'].Value "$label must occupy the right-hand action column."
+    Require-Equal 'Center' $parent.VerticalAlignment "$label must stay vertically centered beside the editor."
+}
+Assert-ComposerPrimary $startVideo 'Generate'
+$chatSend = $mainPage.SelectSingleNode("//xaml:Button[@x:Name='SendButton']", $pageNs)
+Assert-ComposerPrimary $chatSend 'Send'
+$hanhuaStart = $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='ComposerStartButton']", $hanhuaNs)
+Assert-ComposerPrimary $hanhuaStart 'Hanhua start'
+if ($hanhuaStart.ParentNode -ne $hanhuaPanel.SelectSingleNode("//xaml:Button[@x:Name='PickFolderButton']", $hanhuaNs).ParentNode) {
+    throw 'Hanhua start must stay next to the folder picker.'
+}
+$hanhuaKind = $hanhuaPanel.SelectSingleNode("//xaml:ComboBox[@x:Name='KindBox']", $hanhuaNs)
+Require-Equal '2' $hanhuaKind.ParentNode.Attributes['Grid.ColumnSpan'].Value 'Hanhua kind and engine must stay on the title row and not widen the start column.'
 if ($videoPanelSource -notmatch 'VideoJobProgress\.Visibility\s*=\s*generating\s*\?\s*Visibility\.Visible\s*:\s*Visibility\.Collapsed' -or
     $videoPanelSource -notmatch 'CancelVideoButton\.Visibility\s*=\s*generating\s*\?\s*Visibility\.Visible\s*:\s*Visibility\.Collapsed') {
     throw 'Busy-only video progress and cancel visibility must be synchronized with generation state.'

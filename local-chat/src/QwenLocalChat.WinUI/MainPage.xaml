@@ -254,7 +254,8 @@
                 </Grid>
             </Border>
 
-            <Grid x:Name="ChatFooterHost" Grid.Row="3" ColumnSpacing="12">
+            <Border x:Name="ChatFooterHost" Grid.Row="3" Style="{StaticResource CommandSurfaceStyle}">
+                <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -276,7 +277,8 @@
                         </Button.Flyout>
                     </Button>
                 </StackPanel>
-            </Grid>
+                </Grid>
+            </Border>
 
             <Grid x:Name="VideoModeHost" Grid.Row="1" Grid.RowSpan="3" Visibility="Collapsed" Background="Transparent" Padding="0,0,0,2">
                 <local:VideoGenerationPanel x:Name="VideoPanel" />

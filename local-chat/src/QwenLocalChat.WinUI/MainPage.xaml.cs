@@ -68,6 +68,7 @@ public sealed partial class MainPage : Page
     private bool _drainChatQueue = true;
     /// <summary>Last conversation that used llama-server. Switching threads must drop that slot KV.</summary>
     private string? _lastModelSessionId;
+    private string? _hanhuaLaunchNotice;
 
     private enum ExpandedEditorMode { Chat, Video, ReadOnly }
 
@@ -230,26 +231,29 @@ public sealed partial class MainPage : Page
             _initializationStage = "准备模型服务";
             UpdateTextModelStatus(ModelLifecycleState.NotStarted);
             UpdateVideoModelStatus(new(ModelLifecycleState.NotStarted));
-            if (VideoPanel.HasInterruptedWork)
+            ApplyStartupPage();
+            if (StartupPageSelection.ResumeInterruptedVideo(_settings.StartupPage, VideoPanel.HasInterruptedWork))
             {
-                ModeSelector.SelectedItem = VideoModeItem;
-                if (VideoPanel.InterruptedWorkSummary is { } summary)
-                    SetNotice(summary, WarningText);
                 try { await StartVideoModelAsync(); }
                 catch (Exception error) { SetNotice($"恢复视频任务前启动服务失败：{error.Message}", ErrorText); }
                 _ = RestoreInterruptedVideoWorkAsync();
             }
-            else if (HanhuaPanel.HasInterruptedWork)
-            {
-                ModeSelector.SelectedItem = HanhuaModeItem;
-                if (HanhuaPanel.InterruptedWorkSummary is { } summary)
-                    SetNotice(summary, WarningText);
-                var plan = StartupModelPlan.Resolve(_settings.StartupModel);
-                if (plan.StartTextModel) await StartTextModelAsync();
-            }
             else
             {
                 await ApplyStartupModelSelectionAsync();
+            }
+            if (VideoPanel.HasInterruptedWork)
+            {
+                if (VideoPanel.InterruptedWorkSummary is { } summary)
+                    SetNotice(summary, WarningText);
+            }
+            else if (HanhuaPanel.HasInterruptedWork)
+            {
+                if (HanhuaPanel.InterruptedWorkSummary is { } summary)
+                {
+                    _hanhuaLaunchNotice = summary;
+                    SetNotice(summary, WarningText);
+                }
             }
             UpdateContinueButtonState();
         }
@@ -535,6 +539,14 @@ public sealed partial class MainPage : Page
     {
         if (!string.IsNullOrWhiteSpace(e.StatusText))
             SetStatus(QwenStatusText, "• " + e.StatusText, WarningText);
+        if (e.Need == HanhuaGpuNeed.None
+            && !HanhuaPanel.HasInterruptedWork
+            && _hanhuaLaunchNotice is not null
+            && NoticeText.Text == _hanhuaLaunchNotice)
+        {
+            _hanhuaLaunchNotice = null;
+            SetNotice("", MutedText);
+        }
         var label = StartTextModelPageButton.Content as string;
         var occupied = label is "启动中" or "已启动";
         StartTextModelPageButton.IsEnabled = !occupied && !HanhuaPanel.IsBusy;
@@ -846,13 +858,26 @@ public sealed partial class MainPage : Page
         }
     }
 
+    private void ApplyStartupPage()
+    {
+        var page = StartupPageSelection.Resolve(
+            _settings.StartupPage,
+            HanhuaPanel.HasInterruptedWork,
+            VideoPanel.HasInterruptedWork);
+        ModeSelector.SelectedItem = page switch
+        {
+            StartupPageSelection.Video => VideoModeItem,
+            StartupPageSelection.Hanhua => HanhuaModeItem,
+            _ => ChatModeItem,
+        };
+    }
+
     private async Task ApplyStartupModelSelectionAsync()
     {
         var plan = StartupModelPlan.Resolve(_settings.StartupModel);
         switch (plan.Mode)
         {
             case StartupModelSelection.Video:
-                ModeSelector.SelectedItem = VideoModeItem;
                 if (plan.StartVideoModel) await StartVideoModelAsync();
                 break;
             case StartupModelSelection.None:
@@ -862,7 +887,6 @@ public sealed partial class MainPage : Page
                 await VideoPanel.RefreshModelStatusAsync();
                 break;
             default:
-                ModeSelector.SelectedItem = ChatModeItem;
                 if (plan.ChatNotice is not null) SetNotice(plan.ChatNotice, WarningText);
                 if (plan.StartTextModel) await StartTextModelAsync();
                 break;
@@ -1577,33 +1601,39 @@ public sealed partial class MainPage : Page
                 effectiveContext,
                 gen.RequestedMaxOutputTokens,
                 _settings.MaxHistoryRounds);
-            IReadOnlyList<ChatMessage> requestMessages;
+            if (_chatClient is null) throw new InvalidOperationException("文本模型尚未初始化。");
+            FittedPrompt fitted;
             if (gen.IsContinuation)
             {
-                requestMessages = AssistantContinuation.BuildPrefillMessages(gen.RequestHistory, contextPolicy);
+                fitted = await AssistantContinuation.BuildPrefillAsync(gen.RequestHistory, _chatClient, contextPolicy, sendToken);
             }
             else
             {
-                requestMessages = ConversationContext.Build(
-                    gen.RequestHistory, gen.UserMessage, memoryContext, contextPolicy);
+                fitted = await ConversationContext.BuildAsync(
+                    gen.RequestHistory, gen.UserMessage, _chatClient, memoryContext, contextPolicy, sendToken);
             }
-            var maxOutputTokens = ContextBudget.CalculateMaxOutputTokens(
-                requestMessages,
+            var requestMessages = fitted.Messages;
+            var thinking = _activeModelSettings.ReasoningEnabled && !gen.IsContinuation;
+            var budget = ContextBudget.Plan(
+                fitted.PromptTokens,
                 effectiveContext,
-                gen.RequestedMaxOutputTokens);
+                gen.RequestedMaxOutputTokens,
+                thinking);
+            var maxOutputTokens = budget.AnswerTokens;
             gen.AppliedMaxOutputTokens = maxOutputTokens;
             gen.StartedTimestamp = Stopwatch.GetTimestamp();
             if (IsViewingSession(gen.SessionId) && _generations.Count == 1)
                 SetNotice(FormatLiveGenerationProgress(gen, outputChars: 0), MutedText);
 
-            // Prefill continuation: disable thinking so the budget is not spent on reasoning_content.
-            // Normal turns: keep server thinking when enabled, with an auto thinking-token budget.
+            // Prefill continuation turns thinking off. A normal turn keeps the server think cap
+            // separate from the answer budget.
             var generation = ChatGenerationOptions.FromSettings(
                 _settings,
                 _activeModelSettings.ModelAlias,
-                maxOutputTokens,
+                budget.MaxTokens,
                 enableThinking: gen.IsContinuation ? false : null,
-                reasoningEnabled: _activeModelSettings.ReasoningEnabled && !gen.IsContinuation)
+                reasoningEnabled: thinking,
+                thinkingTokens: budget.ThinkingTokens)
                 with
                 {
                     SlotId = 0,

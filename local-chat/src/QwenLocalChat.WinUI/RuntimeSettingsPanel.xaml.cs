@@ -359,6 +359,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         StreamResponsesToggle.IsOn = settings.StreamResponses;
         ModelExclusivityToggle.IsOn = settings.EnforceTextVideoModelExclusivity;
         SelectStartupModel(settings.StartupModel);
+        SelectStartupPage(settings.StartupPage);
         AutoTightenOutputToggle.IsOn = settings.AutoTightenOutputTokens;
         SegmentedLongFormToggle.IsOn = settings.SegmentedLongForm;
         ClientRepetitionGuardToggle.IsOn = settings.ClientRepetitionGuard;
@@ -563,6 +564,25 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         => StartupModelBox.SelectedItem is ComboBoxItem { Tag: string tag }
             ? StartupModelSelection.Normalize(tag)
             : StartupModelSelection.Text;
+
+    private void SelectStartupPage(string? startupPage)
+    {
+        var normalized = StartupPageSelection.Normalize(startupPage);
+        foreach (var item in StartupPageBox.Items.OfType<ComboBoxItem>())
+        {
+            if (string.Equals(item.Tag as string, normalized, StringComparison.Ordinal))
+            {
+                StartupPageBox.SelectedItem = item;
+                return;
+            }
+        }
+        StartupPageBox.SelectedIndex = 0;
+    }
+
+    private string ReadStartupPage()
+        => StartupPageBox.SelectedItem is ComboBoxItem { Tag: string tag }
+            ? StartupPageSelection.Normalize(tag)
+            : StartupPageSelection.Chat;
 
     private void TextModelProfileBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -860,6 +880,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             StreamResponses = StreamResponsesToggle.IsOn,
             EnforceTextVideoModelExclusivity = ModelExclusivityToggle.IsOn,
             StartupModel = ReadStartupModel(),
+            StartupPage = ReadStartupPage(),
             AutoTightenOutputTokens = AutoTightenOutputToggle.IsOn,
             SegmentedLongForm = SegmentedLongFormToggle.IsOn,
             ClientRepetitionGuard = ClientRepetitionGuardToggle.IsOn,
@@ -1065,6 +1086,7 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             AutoStartOnDemand = _original.AutoStartOnDemand,
             SelectedTextProfileId = _original.SelectedTextProfileId,
             StartupModel = _original.StartupModel,
+            StartupPage = _original.StartupPage,
             SelectedVideoProfileId = preservedVideo.SelectedVideoProfileId,
             VideoGeneration = BuildDraft().VideoGeneration,
             VideoPromptPhrases = preservedVideo.VideoPromptPhrases,

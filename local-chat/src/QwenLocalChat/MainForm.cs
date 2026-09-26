@@ -518,7 +518,7 @@ internal sealed class MainForm : Form
                 }
             }
 
-            var requestMessages = ConversationContext.Build(_history, userMessage, memoryContext);
+            var requestMessages = (await ConversationContext.BuildAsync(_history, userMessage, _chatClient, memoryContext)).Messages;
             var assistantMessage = await _chatClient.CompleteAsync(requestMessages);
             _history.Add(new ChatMessage("user", userMessage));
             _history.Add(new ChatMessage("assistant", assistantMessage));

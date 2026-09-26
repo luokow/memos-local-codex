@@ -18,9 +18,11 @@ public static class AssistantContinuation
     /// Build the request that ends on the incomplete assistant message (prefill), applying
     /// the same history/budget trimming as a normal turn — without inventing a new user prompt.
     /// </summary>
-    public static IReadOnlyList<ChatMessage> BuildPrefillMessages(
+    public static async Task<FittedPrompt> BuildPrefillAsync(
         IReadOnlyList<ChatMessage> committedHistory,
-        ContextWindowPolicy? policy = null)
+        IPromptTokenCounter tokens,
+        ContextWindowPolicy? policy = null,
+        CancellationToken cancellationToken = default)
     {
         if (committedHistory.Count == 0 || committedHistory[^1].Role is not "assistant")
             throw new InvalidOperationException("没有可继续的助手回复");
@@ -31,16 +33,17 @@ public static class AssistantContinuation
         var start = Math.Max(0, committedHistory.Count - (policy.MaxHistoryRounds * 2));
         if (start % 2 != 0) start++;
         var result = committedHistory.Skip(start).ToList();
-        // Keep the trailing assistant prefill; drop oldest complete user/assistant pairs only.
+        var promptTokens = await tokens.CountAsync(result, cancellationToken);
         while (result.Count >= 3
-               && TokenEstimate.Messages(result) > ContextBudget.InputTokenBudget(policy))
+               && promptTokens > ContextBudget.InputTokenBudget(policy))
         {
             result.RemoveRange(0, 2);
+            promptTokens = await tokens.CountAsync(result, cancellationToken);
         }
 
         if (result.Count == 0 || result[^1].Role is not "assistant")
             throw new InvalidOperationException("上下文预算不足，无法保留待续写的回复，请提高上下文窗口或缩短前文。");
-        return result;
+        return new FittedPrompt(result, promptTokens);
     }
 
     /// <summary>

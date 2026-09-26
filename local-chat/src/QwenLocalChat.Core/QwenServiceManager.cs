@@ -23,7 +23,8 @@ public sealed record LocalModelOptions(
     string StartLockFile = "",
     string LifecycleLogFile = "",
     string ConfigSha256 = "",
-    bool VerifyServiceIdentity = false);
+    bool VerifyServiceIdentity = false,
+    IReadOnlyList<string>? RuntimeFlags = null);
 
 public sealed record ModelAvailability(bool Reused, int? OwnedProcessId);
 

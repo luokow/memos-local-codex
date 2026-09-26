@@ -46,6 +46,11 @@ public sealed record ModelServiceConfig
     [JsonPropertyName("auto_start_on_demand")]
     public bool AutoStartOnDemand { get; init; }
 
+    /// <summary>Extra llama-server arguments for this model only. Empty means the server defaults.</summary>
+    [JsonPropertyName("runtime_flags")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? RuntimeFlags { get; init; }
+
     public string ResolveServerExecutable(string projectRoot) => ResolveProjectPath(projectRoot, ServerExecutable);
     public string ResolveModelPath(string projectRoot) => ResolveProjectPath(projectRoot, ModelPath);
 
@@ -75,7 +80,8 @@ public sealed record ModelServiceConfig
             startLockFile,
             lifecycleLogFile,
             ConfigSha256(),
-            VerifyServiceIdentity: true);
+            VerifyServiceIdentity: true,
+            RuntimeFlags);
     }
 
     public IReadOnlyList<string> Validate(bool checkFiles = true, string? projectRoot = null)
@@ -91,6 +97,14 @@ public sealed record ModelServiceConfig
         if (GpuLayers is < 0 or > 999) errors.Add("GPU 层数必须在 0 到 999 之间");
         if (ParallelSlots is < 1 or > 8) errors.Add("并发槽位必须在 1 到 8 之间");
         if (StartupTimeoutSeconds is < 30 or > 600) errors.Add("启动等待秒数必须在 30 到 600 之间");
+        if (RuntimeFlags is not null)
+        {
+            foreach (var flag in RuntimeFlags)
+            {
+                if (string.IsNullOrWhiteSpace(flag) || flag.Contains(' '))
+                    errors.Add("模型启动旗标必须是不含空格的单独参数");
+            }
+        }
         if (checkFiles)
         {
             if (string.IsNullOrWhiteSpace(projectRoot))
@@ -158,6 +172,11 @@ public sealed class ModelServiceConfigStore(string projectRoot, string configPat
         "startup_timeout_seconds", "auto_start_on_demand",
     };
 
+    private static readonly HashSet<string> OptionalFields = new(StringComparer.Ordinal)
+    {
+        "runtime_flags",
+    };
+
     internal static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -186,7 +205,7 @@ public sealed class ModelServiceConfigStore(string projectRoot, string configPat
                 throw new JsonException("共享模型服务配置必须是 JSON 对象");
             var unknown = document.RootElement.EnumerateObject()
                 .Select(property => property.Name)
-                .Where(name => !AllowedFields.Contains(name))
+                .Where(name => !AllowedFields.Contains(name) && !OptionalFields.Contains(name))
                 .ToArray();
             if (unknown.Length > 0) throw new JsonException($"共享模型服务配置包含未知字段：{string.Join(", ", unknown)}");
             var present = document.RootElement.EnumerateObject()

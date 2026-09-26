@@ -33,9 +33,10 @@ internal static class SelfTest
             using var chat = new QwenChatClient(options.ChatCompletionsUri);
             var marker = $"蓝鲸-{Guid.NewGuid():N}"[..15];
             var first = await chat.CompleteAsync([new("user", $"请只回答这个代号，不要添加其他内容：{marker}")]);
-            var second = await chat.CompleteAsync(ConversationContext.Build(
+            var second = await chat.CompleteAsync((await ConversationContext.BuildAsync(
                 [new("user", $"请只回答这个代号，不要添加其他内容：{marker}"), new("assistant", first)],
-                "我上一条指定的代号是什么？只回答代号。"));
+                "我上一条指定的代号是什么？只回答代号。",
+                chat)).Messages);
             checks["two_turn_context"] = NormalizeToken(second).Contains(NormalizeToken(marker), StringComparison.OrdinalIgnoreCase);
             checks["first_answer"] = first;
             checks["second_answer"] = second;

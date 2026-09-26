@@ -1,5 +1,8 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.WebSockets;
+using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -215,6 +218,66 @@ public static class ComfyUiJobResponseParser
         }
         return false;
     }
+
+    public readonly record struct ComfySocketEffect(string Status, double? Progress, string? Error);
+
+    /// <summary>
+    /// Maps one ComfyUI /ws text frame for this prompt.
+    /// progress supplies value/max. execution_error, execution_success, and execution_interrupted are terminal.
+    /// </summary>
+    public static bool TryReadSocket(string json, string promptId, out ComfySocketEffect effect)
+    {
+        effect = default;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("type", out var typeElement)) return false;
+            var type = typeElement.GetString();
+            if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+                return false;
+            if (data.TryGetProperty("prompt_id", out var idElement) && idElement.ValueKind == JsonValueKind.String)
+            {
+                var id = idElement.GetString();
+                if (!string.IsNullOrEmpty(id) && !string.Equals(id, promptId, StringComparison.Ordinal))
+                    return false;
+            }
+            switch (type)
+            {
+                case "progress":
+                    double? fraction = null;
+                    if (data.TryGetProperty("value", out var valueElement)
+                        && data.TryGetProperty("max", out var maxElement)
+                        && valueElement.TryGetDouble(out var value)
+                        && maxElement.TryGetDouble(out var max)
+                        && max > 0)
+                        fraction = value / max;
+                    effect = new ComfySocketEffect("in_progress", fraction, null);
+                    return true;
+                case "execution_error":
+                    var message = data.TryGetProperty("exception_message", out var messageElement) && messageElement.ValueKind == JsonValueKind.String
+                        ? messageElement.GetString()
+                        : "视频生成失败";
+                    effect = new ComfySocketEffect("failed", null, message);
+                    return true;
+                case "execution_success":
+                    effect = new ComfySocketEffect("completed", 1, null);
+                    return true;
+                case "execution_interrupted":
+                    effect = new ComfySocketEffect("cancelled", null, null);
+                    return true;
+                case "executing" when data.TryGetProperty("node", out var node) && node.ValueKind == JsonValueKind.Null:
+                    effect = new ComfySocketEffect("completed", 1, null);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 }
 
 public sealed class ComfyUiWorkflowVideoClient : IDisposable
@@ -225,6 +288,7 @@ public sealed class ComfyUiWorkflowVideoClient : IDisposable
     private readonly bool _ownsHttp;
     private string? _lastFingerprint;
     private DateTimeOffset _lastFingerprintChangeUtc = DateTimeOffset.UtcNow;
+    private string? _socketClientId;
 
     /// <summary>Injected for tests; production uses <see cref="VideoJobLiveness.DefaultStuckThreshold"/>.</summary>
     public TimeSpan StuckThreshold { get; set; } = VideoJobLiveness.DefaultStuckThreshold;
@@ -681,9 +745,10 @@ public sealed class ComfyUiWorkflowVideoClient : IDisposable
     {
         graph.Remove("__resolved_seed");
         ResetLiveness();
+        _socketClientId = Guid.NewGuid().ToString("N");
         using var response = await _http.PostAsJsonAsync(
             new Uri(_profile.Service.BaseUri, "prompt"),
-            new { prompt = graph },
+            new { prompt = graph, client_id = _socketClientId },
             cancellationToken).ConfigureAwait(false);
         var raw = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
@@ -813,12 +878,70 @@ public sealed class ComfyUiWorkflowVideoClient : IDisposable
 
     public async Task CancelAsync(string promptId, CancellationToken cancellationToken = default)
     {
+        _ = promptId;
         using var response = await _http.PostAsync(
-            new Uri(_profile.Service.BaseUri, $"api/jobs/{Uri.EscapeDataString(promptId)}/cancel"),
+            new Uri(_profile.Service.BaseUri, "interrupt"),
             null,
             cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException($"取消视频任务失败：HTTP {(int)response.StatusCode}");
+    }
+
+    public async IAsyncEnumerable<VideoJob> WatchPromptAsync(
+        string promptId,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(_socketClientId))
+            throw new InvalidOperationException("视频任务还没有提交，不能监听进度。");
+        using var socket = new ClientWebSocket();
+        var http = _profile.Service.BaseUri;
+        var wsUri = new UriBuilder(http)
+        {
+            Scheme = http.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase) ? "wss" : "ws",
+            Path = "/ws",
+            Query = "clientId=" + Uri.EscapeDataString(_socketClientId),
+        }.Uri;
+        await socket.ConnectAsync(wsUri, cancellationToken).ConfigureAwait(false);
+        var buffer = new byte[64 * 1024];
+        while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+        {
+            using var message = new MemoryStream();
+            WebSocketReceiveResult received;
+            do
+            {
+                received = await socket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (received.MessageType == WebSocketMessageType.Close)
+                    yield break;
+                if (received.MessageType == WebSocketMessageType.Text)
+                    message.Write(buffer, 0, received.Count);
+            }
+            while (!received.EndOfMessage);
+            if (received.MessageType != WebSocketMessageType.Text || message.Length == 0)
+                continue;
+            var text = Encoding.UTF8.GetString(message.ToArray());
+            if (!ComfyUiJobResponseParser.TryReadSocket(text, promptId, out var effect))
+                continue;
+            VideoJob job;
+            if (effect.Status == "completed")
+            {
+                var history = await ReadHistoryJobAsync(promptId, cancellationToken).ConfigureAwait(false);
+                job = history ?? new VideoJob(promptId, "completed", effect.Progress);
+            }
+            else
+            {
+                job = new VideoJob(promptId, effect.Status, effect.Progress, effect.Error);
+            }
+            yield return job;
+            if (job.IsTerminal)
+                yield break;
+        }
+    }
+
+    private async Task<VideoJob?> ReadHistoryJobAsync(string promptId, CancellationToken cancellationToken)
+    {
+        var historyJson = await TryGetStringAsync($"history/{Uri.EscapeDataString(promptId)}", cancellationToken).ConfigureAwait(false);
+        if (historyJson is null) return null;
+        return ComfyUiJobResponseParser.TryParseHistory(historyJson, promptId, ResolveOutput);
     }
 
     public void ResetLiveness()

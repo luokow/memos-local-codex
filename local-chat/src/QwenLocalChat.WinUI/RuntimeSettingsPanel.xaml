@@ -92,9 +92,14 @@
                             <StackPanel Spacing="8">
                                 <StackPanel Spacing="2">
                                     <TextBlock Text="启动与驻留" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="选择客户端打开后自动启动的当前模型；默认启动文本模型。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <TextBlock Text="打开后先显示所选页面。未完成的汉化或视频只提示，不改页面。下面再决定是否启动模型。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
+                                <ComboBox x:Name="StartupPageBox" AutomationProperties.AutomationId="StartupPageSetting" AutomationProperties.Name="打开应用后显示的页面" Header="打开后显示">
+                                    <ComboBoxItem Content="聊天" Tag="chat" />
+                                    <ComboBoxItem Content="视频" Tag="video" />
+                                    <ComboBoxItem Content="汉化" Tag="hanhua" />
+                                </ComboBox>
                                 <ComboBox x:Name="StartupModelBox" AutomationProperties.AutomationId="StartupModelSetting" AutomationProperties.Name="打开应用后启动的模型" Header="打开应用后启动">
                                     <ComboBoxItem Content="文本模型" Tag="text" />
                                     <ComboBoxItem Content="视频模型" Tag="video" />

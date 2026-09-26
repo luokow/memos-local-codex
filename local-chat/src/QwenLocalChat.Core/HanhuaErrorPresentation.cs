@@ -44,7 +44,8 @@ public static class HanhuaErrorPresentation
                 : done <= 0
                     ? "插件已就绪。请完全退出游戏，点打开结果启动（不要直接开 exe）。Local AI 不会给正在开着的游戏改字。新对白要先玩到，再点开始汉化预填。"
                     : "汉化完成。可点打开结果启动游戏。Unity 玩过新场景后再点开始汉化填新句子。",
-            HanhuaJobStatus.Interrupted => "已取消。已完成的部分还在，点开始汉化可从当前步继续。",
+            HanhuaJobStatus.Interrupted => "上次汉化未完成。点开始汉化可从当前步继续。",
+            HanhuaJobStatus.Cancelled => "已取消。要补未译内容，点补翻译。",
             HanhuaJobStatus.Failed => FormatFailed(Summarize(raw, phase)),
             _ => raw,
         };

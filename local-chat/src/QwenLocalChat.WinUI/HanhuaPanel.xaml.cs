@@ -74,34 +74,51 @@ public sealed partial class HanhuaPanel : UserControl
         _suppressEngine = true;
         SelectTagged(EngineBox, HanhuaEngineCodec.ToJson(HanhuaEngineCodec.Parse(settings().HanhuaEngine)));
         _suppressEngine = false;
-        var interrupted = _store.MarkInterruptedIfRunning();
-        HasInterruptedWork = interrupted?.CanResume == true;
-        InterruptedWorkSummary = HasInterruptedWork
-            ? "有未完成的汉化任务。打开汉化页后可继续，不会自动开始。"
-            : null;
-        if (interrupted is not null)
+        var freshInterrupt = _store.MarkInterruptedIfRunning();
+        if (freshInterrupt is not null)
         {
-            _job = interrupted;
-            SourcePathBox.Text = interrupted.SourcePath;
-            SelectTagged(KindBox, interrupted.Kind == HanhuaKind.Image ? "image" : "game");
-            AppendLog(interrupted.Message ?? "上次汉化未完成。");
-            SetIdleStatus(interrupted.Message ?? "上次汉化未完成。");
+            HasInterruptedWork = true;
+            InterruptedWorkSummary = "有未完成的汉化任务。打开汉化页后可继续，不会自动开始。";
+            RestoreJob(freshInterrupt, freshInterrupt.Message ?? "上次汉化未完成。");
         }
         else
         {
-            var catchUp = HanhuaCatchUp.Latest(_store.Load().Jobs);
-            if (catchUp is not null)
+            HasInterruptedWork = false;
+            InterruptedWorkSummary = null;
+            var parked = _store.Load().Jobs
+                .Where(job => job.Status == HanhuaJobStatus.Interrupted)
+                .OrderByDescending(job => job.UpdatedUtc)
+                .FirstOrDefault();
+            if (parked is not null)
             {
-                _job = catchUp;
-                SourcePathBox.Text = catchUp.SourcePath;
-                SelectTagged(KindBox, catchUp.Kind == HanhuaKind.Image ? "image" : "game");
-                OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(catchUp.OutputPath);
-                SetIdleStatus(catchUp.Kind == HanhuaKind.Image
-                    ? "上次图片汉化可点补翻译，或点开始汉化选择接着上次/全新。"
-                    : "上次 Unity 汉化可点补翻译，只填 unmatched / 未译句子。");
+                RestoreJob(parked, parked.Message ?? "已取消。已完成的部分还在，点开始汉化可从当前步继续。");
+            }
+            else
+            {
+                var catchUp = HanhuaCatchUp.Latest(_store.Load().Jobs);
+                if (catchUp is not null)
+                {
+                    _job = catchUp;
+                    SourcePathBox.Text = catchUp.SourcePath;
+                    SelectTagged(KindBox, catchUp.Kind == HanhuaKind.Image ? "image" : "game");
+                    OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(catchUp.OutputPath);
+                    SetIdleStatus(catchUp.Kind == HanhuaKind.Image
+                        ? "上次图片汉化可点补翻译，或点开始汉化选择接着上次/全新。"
+                        : "上次 Unity 汉化可点补翻译，只填 unmatched / 未译句子。");
+                }
             }
         }
         UpdateButtons();
+    }
+
+    private void RestoreJob(HanhuaJob job, string status)
+    {
+        _job = job;
+        SourcePathBox.Text = job.SourcePath;
+        SelectTagged(KindBox, job.Kind == HanhuaKind.Image ? "image" : "game");
+        AppendLog(job.Message ?? status);
+        OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(job.OutputPath);
+        SetIdleStatus(status);
     }
 
     public async Task ShutdownAsync()
@@ -358,7 +375,7 @@ public sealed partial class HanhuaPanel : UserControl
                 await RunImageAsync(settings, job, _runCts.Token);
             if (_job.Status == HanhuaJobStatus.Cancelling)
             {
-                Finish(HanhuaJobStatus.Interrupted, _job.Phase, "已取消。已完成的部分还在，点开始汉化可从当前步继续。");
+                Finish(HanhuaJobStatus.Cancelled, _job.Phase, "已取消。要补未译内容，点补翻译。");
                 return;
             }
             Finish(HanhuaJobStatus.Succeeded, _job.Phase, catchUp ? "补翻译完成。" : "汉化完成。");
@@ -366,7 +383,7 @@ public sealed partial class HanhuaPanel : UserControl
         }
         catch (OperationCanceledException)
         {
-            Finish(HanhuaJobStatus.Interrupted, _job.Phase, "已取消。已完成的部分还在，点开始汉化可从当前步继续。");
+            Finish(HanhuaJobStatus.Cancelled, _job.Phase, "已取消。要补未译内容，点补翻译。");
         }
         catch (Exception error)
         {
@@ -528,8 +545,8 @@ public sealed partial class HanhuaPanel : UserControl
         _store?.Upsert(_job);
         AppendLog(display);
         SetIdleStatus(HanhuaProgressStatus.FormatFinished(display, DisplayElapsed));
-        HasInterruptedWork = status is HanhuaJobStatus.Interrupted;
-        InterruptedWorkSummary = HasInterruptedWork ? display : null;
+        HasInterruptedWork = false;
+        InterruptedWorkSummary = null;
         OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(_job.OutputPath);
         HanhuaErrorDetailsButton.Visibility = status == HanhuaJobStatus.Failed ? Visibility.Visible : Visibility.Collapsed;
     }

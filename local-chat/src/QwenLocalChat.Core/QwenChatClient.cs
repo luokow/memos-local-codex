@@ -27,9 +27,11 @@ public sealed record ChatGenerationOptions(
     /// </summary>
     bool? EnableThinking = null,
     /// <summary>
-    /// Optional thinking token cap (llama.cpp). null = server default; 0 = no thinking budget field.
+    /// llama.cpp thinking cap. null omits it. 0 force-closes thinking immediately.
     /// </summary>
     int? ReasoningBudget = null,
+    /// <summary>Prepended to the forced end-of-think tag when the cap is hit.</summary>
+    string? ReasoningBudgetMessage = null,
     /// <summary>
     /// When true, trim trailing loops/slogan tails and may abort stream early on loops.
     /// Default false — keep model text intact unless user opts in.
@@ -48,7 +50,8 @@ public sealed record ChatGenerationOptions(
         string modelAlias,
         int maxOutputTokens,
         bool? enableThinking = null,
-        bool reasoningEnabled = false)
+        bool reasoningEnabled = false,
+        int thinkingTokens = 0)
     {
         // Silently extend timeout if the user set max_tokens high but left a short timeout —
         // avoids mid-stream aborts without pushing noisy UI.
@@ -57,10 +60,8 @@ public sealed record ChatGenerationOptions(
             ContextBudget.SuggestMinTimeoutSeconds(maxOutputTokens));
 
         int? reasoningBudget = null;
-        if (enableThinking is false)
-            reasoningBudget = null;
-        else if (reasoningEnabled || enableThinking is true)
-            reasoningBudget = ContextBudget.SuggestReasoningBudget(maxOutputTokens);
+        if (enableThinking is not false && (reasoningEnabled || enableThinking is true))
+            reasoningBudget = Math.Max(0, thinkingTokens);
 
         return new(
             ModelAlias: modelAlias,
@@ -103,21 +104,24 @@ public sealed record ChatGenerationOptions(
             // llama.cpp extensions: short-window token repeat + long-range DRY n-gram penalty.
             ["repeat_penalty"] = RepeatPenalty,
             ["repeat_last_n"] = RepeatLastN,
-            ["dry_multiplier"] = DryMultiplier,
-            ["dry_base"] = LocalChatSettings.DefaultDryBase,
-            ["dry_allowed_length"] = LocalChatSettings.DefaultDryAllowedLength,
-            // -1 = whole generation (needed for paragraph loops beyond short windows).
-            ["dry_penalty_last_n"] = LocalChatSettings.DefaultDryPenaltyLastN,
         };
+        if (DryMultiplier != 0)
+            payload["dry_multiplier"] = DryMultiplier;
         if (Stream)
             payload["stream_options"] = new { include_usage = true };
         // Qwen3 / llama.cpp: thinking tokens arrive as reasoning_content, not content.
         // Forcing enable_thinking=false on continue avoids emptying the whole max_tokens budget.
         if (EnableThinking is { } enableThinking)
             payload["chat_template_kwargs"] = new { enable_thinking = enableThinking };
-        // Cap thinking so long free-form answers still get body tokens (server may ignore unknown fields).
-        if (ReasoningBudget is > 0)
-            payload["reasoning_budget"] = ReasoningBudget.Value;
+        // thinking_budget_tokens is the chat alias; reasoning_budget_tokens is the canonical field.
+        // The old reasoning_budget name is ignored, so thinking runs until max_tokens.
+        if (ReasoningBudget is int thinkingBudget)
+        {
+            payload["thinking_budget_tokens"] = thinkingBudget;
+            payload["reasoning_budget_tokens"] = thinkingBudget;
+            if (!string.IsNullOrEmpty(ReasoningBudgetMessage))
+                payload["reasoning_budget_message"] = ReasoningBudgetMessage;
+        }
         if (SlotId is int slotId)
             payload["id_slot"] = slotId;
         if (CachePrompt is bool cachePrompt)
@@ -133,9 +137,46 @@ public sealed record ChatCompletionResult(
     int? CompletionTokens,
     int ReasoningChars = 0);
 
-public sealed class QwenChatClient(Uri endpoint, HttpClient? httpClient = null) : ILocalChatClient
+public interface IPromptTokenCounter
+{
+    Task<int> CountAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default);
+}
+
+public sealed class QwenChatClient(Uri endpoint, HttpClient? httpClient = null) : ILocalChatClient, IPromptTokenCounter
 {
     private readonly HttpClient _http = httpClient ?? new HttpClient(new SocketsHttpHandler { UseProxy = false });
+
+    public Task<int> CountAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
+        => CountPromptTokensAsync(messages, cancellationToken);
+
+    /// <summary>
+    /// Token count of the prompt llama-server would actually score:
+    /// /apply-template renders the chat template, /tokenize counts that string.
+    /// add_special stays false because the template already includes special tokens.
+    /// </summary>
+    public async Task<int> CountPromptTokensAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
+    {
+        var root = new Uri(endpoint.GetLeftPart(UriPartial.Authority) + "/");
+        using var templateResponse = await _http.PostAsJsonAsync(
+            new Uri(root, "apply-template"),
+            new { messages = messages.Select(message => new { role = message.Role, content = message.Content }).ToArray() },
+            cancellationToken);
+        var templateRaw = await templateResponse.Content.ReadAsStringAsync(cancellationToken);
+        if (!templateResponse.IsSuccessStatusCode)
+            throw new HttpRequestException($"apply-template 返回 HTTP {(int)templateResponse.StatusCode}: {templateRaw}");
+        using var templateJson = JsonDocument.Parse(templateRaw);
+        var prompt = templateJson.RootElement.GetProperty("prompt").GetString() ?? string.Empty;
+
+        using var tokenResponse = await _http.PostAsJsonAsync(
+            new Uri(root, "tokenize"),
+            new { content = prompt, add_special = false },
+            cancellationToken);
+        var tokenRaw = await tokenResponse.Content.ReadAsStringAsync(cancellationToken);
+        if (!tokenResponse.IsSuccessStatusCode)
+            throw new HttpRequestException($"tokenize 返回 HTTP {(int)tokenResponse.StatusCode}: {tokenRaw}");
+        using var tokenJson = JsonDocument.Parse(tokenRaw);
+        return tokenJson.RootElement.GetProperty("tokens").GetArrayLength();
+    }
 
     public async Task<string> CompleteAsync(IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken = default)
         => (await CompleteWithDetailsAsync(

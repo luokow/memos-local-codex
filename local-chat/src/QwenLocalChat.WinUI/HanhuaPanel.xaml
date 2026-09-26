@@ -44,7 +44,7 @@
             </Border>
         </Grid>
 
-        <Border Grid.Row="1" Margin="0,10,0,10" Padding="14,12,12,10" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="18">
+        <Border x:Name="HanhuaComposerHost" Grid.Row="1" Margin="0,10,0,10" Padding="14,12,12,10" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="18">
             <Grid RowSpacing="6" ColumnSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -58,7 +58,7 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Text="汉化任务" Style="{StaticResource ComposerTitleTextStyle}" VerticalAlignment="Center" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <ComboBox
                         x:Name="KindBox"
                         AutomationProperties.AutomationId="HanhuaKind"
@@ -80,16 +80,11 @@
                     </ComboBox>
                 </StackPanel>
 
-                <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="SourcePathBox" AutomationProperties.AutomationId="HanhuaSourcePath" AutomationProperties.Name="汉化源目录" IsReadOnly="True" PlaceholderText="选择游戏或图片目录" Style="{StaticResource ComposerInputTextBoxStyle}" MinHeight="36" MaxHeight="36" />
-                    <Button Grid.Column="1" x:Name="PickFolderButton" AutomationProperties.AutomationId="HanhuaPickFolderButton" AutomationProperties.Name="选择目录" Content="选择目录" Click="PickFolderButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Center" />
-                    <Button Grid.Column="2" x:Name="ComposerStartButton" AutomationProperties.AutomationId="HanhuaComposerStartButton" AutomationProperties.Name="开始汉化" Content="开始汉化" Click="StartOrCancel_Click" Style="{StaticResource VideoPrimaryButtonStyle}" VerticalAlignment="Center" />
-                </Grid>
+                <TextBox x:Name="SourcePathBox" Grid.Row="1" Grid.Column="0" AutomationProperties.AutomationId="HanhuaSourcePath" AutomationProperties.Name="汉化源目录" IsReadOnly="True" PlaceholderText="选择游戏或图片目录" Style="{StaticResource ComposerInputTextBoxStyle}" MinHeight="40" MaxHeight="40" VerticalAlignment="Center" VerticalContentAlignment="Center" />
+                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <Button x:Name="PickFolderButton" AutomationProperties.AutomationId="HanhuaPickFolderButton" AutomationProperties.Name="选择目录" Content="选择目录" Click="PickFolderButton_Click" Style="{StaticResource ComposerSecondaryButtonStyle}" />
+                    <Button x:Name="ComposerStartButton" AutomationProperties.AutomationId="HanhuaComposerStartButton" AutomationProperties.Name="开始汉化" Content="开始汉化" Click="StartOrCancel_Click" Style="{StaticResource PrimaryButtonStyle}" />
+                </StackPanel>
                 <Border x:Name="DuplicateConfirmBar" Grid.Row="2" Grid.ColumnSpan="2" Visibility="Collapsed" Margin="0,6,0,0" Padding="10,8" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="10">
                     <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
@@ -104,19 +99,19 @@
                         </StackPanel>
                     </Grid>
                 </Border>
-                <TextBlock x:Name="HanhuaComposerHint" Grid.Row="3" Grid.ColumnSpan="2" Text="RPG Maker：复制 → 抽字 → 翻译 → 回写。Unity：装插件 → 预填已抽出的句子。本机模型会自动启动。" Style="{StaticResource ComposerHintTextStyle}" Margin="4,2,0,0" />
+                <TextBlock x:Name="HanhuaComposerHint" Grid.Row="3" Grid.ColumnSpan="2" Text="RPG Maker：复制 → 抽字 → 翻译 → 回写。Unity：装插件 → 预填已抽出的句子。本机模型会自动启动。" Style="{StaticResource ComposerHintTextStyle}" Margin="4,0,0,0" />
             </Grid>
         </Border>
 
-        <Border x:Name="HanhuaCommandSurface" Grid.Row="2" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,8">
+        <Border x:Name="HanhuaCommandSurface" Grid.Row="2" Style="{StaticResource CommandSurfaceStyle}">
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                    <TextBox x:Name="HanhuaStatusBox" AutomationProperties.AutomationId="HanhuaJobStatus" AutomationProperties.Name="汉化任务状态" Text="等待开始" IsReadOnly="True" TextWrapping="NoWrap" AcceptsReturn="False" MinHeight="0" MaxHeight="22" Padding="0" Margin="0" VerticalAlignment="Center" VerticalContentAlignment="Center" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" Foreground="{StaticResource TextSecondaryBrush}" FontFamily="Microsoft YaHei UI" FontSize="13" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
-                    <ProgressBar x:Name="HanhuaJobProgress" Width="120" Height="6" MinHeight="6" AutomationProperties.AutomationId="HanhuaJobProgress" IsIndeterminate="False" VerticalAlignment="Center" Visibility="Collapsed" />
+                    <TextBox x:Name="HanhuaStatusBox" AutomationProperties.AutomationId="HanhuaJobStatus" AutomationProperties.Name="汉化任务状态" Text="等待开始" IsReadOnly="True" TextWrapping="NoWrap" Style="{StaticResource CommandStatusTextBoxStyle}" />
+                    <ProgressBar x:Name="HanhuaJobProgress" AutomationProperties.AutomationId="HanhuaJobProgress" IsIndeterminate="False" Style="{StaticResource CommandProgressBarStyle}" Visibility="Collapsed" />
                     <TextBlock x:Name="HanhuaJobPercentText" AutomationProperties.AutomationId="HanhuaJobPercentText" AutomationProperties.Name="汉化进度百分比" Text="0%" Visibility="Collapsed" Style="{StaticResource ComposerMetaTextStyle}" VerticalAlignment="Center" />
                     <Button x:Name="HanhuaErrorDetailsButton" AutomationProperties.AutomationId="HanhuaErrorDetailsButton" AutomationProperties.Name="查看完整汉化错误" Content="查看详情" Click="ErrorDetailsButton_Click" Visibility="Collapsed" VerticalAlignment="Center" Style="{StaticResource ToolbarButtonStyle}" />
                 </StackPanel>

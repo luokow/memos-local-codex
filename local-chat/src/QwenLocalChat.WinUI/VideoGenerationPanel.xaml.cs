@@ -888,10 +888,9 @@ public sealed partial class VideoGenerationPanel : UserControl
         _job = await _client.SubmitGraphAsync(graph, cancellationToken);
         PersistRuntime();
 
-        while (!_job.IsTerminal)
+        await foreach (var update in _client.WatchPromptAsync(_job.PromptId, cancellationToken))
         {
-            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            _job = await _client.GetJobAsync(_job.PromptId, cancellationToken);
+            _job = update;
 
             int? completedSteps = null;
             if (useStepCheckpoints)
