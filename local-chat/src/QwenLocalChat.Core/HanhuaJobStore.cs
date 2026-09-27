@@ -70,6 +70,18 @@ public sealed class HanhuaJobStore
         }
     }
 
+    public void Remove(string id)
+    {
+        lock (_gate)
+        {
+            var snapshot = Load();
+            Write(snapshot with
+            {
+                Jobs = snapshot.Jobs.Where(job => !string.Equals(job.Id, id, StringComparison.Ordinal)).ToArray(),
+            });
+        }
+    }
+
     public HanhuaJob? MarkInterruptedIfRunning()
     {
         lock (_gate)

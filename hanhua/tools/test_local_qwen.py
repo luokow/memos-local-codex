@@ -33,6 +33,18 @@ class LocalQwenRoutingTests(unittest.TestCase):
             "http://127.0.0.1:18135/v1/chat/completions",
         )
 
+    def test_fill_port_comes_from_env(self) -> None:
+        with patch.dict(os.environ, {"HANHUA_LOCAL_PORT": "18136"}):
+            self.assertEqual(local_qwen.configured_local_port(), 18136)
+        with patch.dict(os.environ, {"HANHUA_LOCAL_PORT": "0"}):
+            self.assertEqual(local_qwen.configured_local_port(), local_qwen.CHAT_PORT)
+        os.environ.pop("HANHUA_LOCAL_PORT", None)
+        self.assertEqual(local_qwen.configured_local_port(), 18135)
+        with patch.object(local_qwen, "LOCAL_PORT", 18136):
+            self.assertEqual(local_qwen.ports_that_block_gpu(), [18136, 18135])
+        with patch.object(local_qwen, "LOCAL_PORT", 18135):
+            self.assertEqual(local_qwen.ports_that_block_gpu(), [18135])
+
     def test_mt_payload_has_no_system(self) -> None:
         payload = local_qwen.mt_payload("qwen-mt-plus", ["こんにちは", "牧場"])
         self.assertEqual(payload["messages"][0]["role"], "user")

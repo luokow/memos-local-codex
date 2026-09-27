@@ -565,7 +565,7 @@ public sealed partial class VideoGenerationPanel : UserControl
         _promptHistory.Record(prompt);
         FlushActiveDraft();
 
-        if (HasRunningJob)
+        if (!VideoJobSlotPolicy.CanStart(HasRunningJob ? 1 : 0))
         {
             var position = _queue.Enqueue(request);
             ApplyQueueStatuses();
@@ -738,7 +738,7 @@ public sealed partial class VideoGenerationPanel : UserControl
 
     private async Task StartNextQueuedAsync()
     {
-        if (!_drainQueue || HasRunningJob) return;
+        if (!_drainQueue || !VideoJobSlotPolicy.CanStart(HasRunningJob ? 1 : 0)) return;
         var next = _queue.Dequeue();
         ApplyQueueStatuses();
         PersistRuntime();

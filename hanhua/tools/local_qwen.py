@@ -16,7 +16,19 @@ from pathlib import Path
 from typing import Any
 
 LOCAL_HOST = "127.0.0.1"
-LOCAL_PORT = 18135
+CHAT_PORT = 18135
+
+
+def configured_local_port() -> int:
+    raw = os.environ.get("HANHUA_LOCAL_PORT", "").strip()
+    if raw.isdigit():
+        port = int(raw)
+        if 1 <= port <= 65535:
+            return port
+    return CHAT_PORT
+
+
+LOCAL_PORT = configured_local_port()
 LOCAL_BASE = f"http://{LOCAL_HOST}:{LOCAL_PORT}/v1"
 LOCAL_CHAT = f"{LOCAL_BASE}/chat/completions"
 LOCAL_HEALTH = f"http://{LOCAL_HOST}:{LOCAL_PORT}/health"
@@ -804,14 +816,26 @@ def post_chat(url: str, payload: dict[str, Any], key: str, timeout: int = TIMEOU
         raise RuntimeError(f"HTTP {exc.code} {body}") from exc
 
 
-def probe() -> tuple[bool, str]:
-    req = urllib.request.Request(LOCAL_HEALTH, method="GET")
+def ports_that_block_gpu() -> list[int]:
+    ports: list[int] = []
+    for port in (LOCAL_PORT, CHAT_PORT):
+        if port not in ports:
+            ports.append(port)
+    return ports
+
+
+def probe_port(port: int) -> tuple[bool, str]:
+    req = urllib.request.Request(f"http://{LOCAL_HOST}:{port}/health", method="GET")
     try:
         with urlopen_http(req, 3, bypass_proxy=True) as resp:
             raw = resp.read().decode("utf-8", "replace")[:200]
             return True, f"health {resp.status} {raw}"
     except Exception as exc:  # noqa: BLE001
         return False, f"{type(exc).__name__}: {exc}"
+
+
+def probe() -> tuple[bool, str]:
+    return probe_port(LOCAL_PORT)
 
 
 def translate_chat(
@@ -852,7 +876,7 @@ def translate_texts(
 def smoke() -> int:
     ok, detail = probe()
     if not ok:
-        print("local Qwen not listening on 127.0.0.1:18135")
+        print(f"local model not listening on 127.0.0.1:{LOCAL_PORT}")
         print(detail)
         print("Open Local AI / Qwen Local Chat first. Do not start MiniMax H3 / ComfyUI.")
         print("System proxy must be bypassed for loopback (this script already does).")

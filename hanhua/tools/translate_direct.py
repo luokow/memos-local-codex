@@ -1,6 +1,6 @@
 # Translate ManualTransFile.json.
 # Default: Aliyun qwen-mt-plus from MTool config (unchanged).
-# --local: Local AI chat Qwen on 127.0.0.1:18135. Never prints API keys.
+# --local: Local AI fill model. Port is HANHUA_LOCAL_PORT, otherwise 18135. Never prints API keys.
 from __future__ import annotations
 
 import json
@@ -83,7 +83,7 @@ def translate_mapping(
         ok, detail = local_qwen.probe()
         if not ok:
             raise RuntimeError(
-                "local Qwen not listening on 127.0.0.1:18135 ("
+                f"local model not listening on 127.0.0.1:{local_qwen.LOCAL_PORT} ("
                 + detail
                 + "). Open Local AI first; do not start MiniMax H3."
             )

@@ -148,11 +148,12 @@ def main() -> int:
     if cfg is None:
         print("missing manga-image-translator config.json", file=sys.stderr)
         return 1
-    ok, detail = local_qwen.probe()
-    if ok:
-        print("Local Qwen is still on 18135. Stop Local AI / llama-server first (8GB GPU).")
-        print(detail)
-        return 3
+    for port in local_qwen.ports_that_block_gpu():
+        ok, detail = local_qwen.probe_port(port)
+        if ok:
+            print(f"llama-server is still on 127.0.0.1:{port}. Stop it before typeset.")
+            print(detail)
+            return 3
     mit_root, mit_py, font = mit_paths()
     if not mit_py.is_file():
         print(f"missing {mit_py}", file=sys.stderr)

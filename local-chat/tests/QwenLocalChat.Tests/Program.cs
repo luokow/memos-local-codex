@@ -228,6 +228,8 @@ var tests = new (string Name, Action Body)[]
     ("hanhua-progress-finished-and-cancelling-keep-elapsed", HanhuaProgressFinishedAndCancellingKeepElapsed),
     ("hanhua-error-summarizes-mit-quit-and-next-action", HanhuaErrorSummarizesMitQuitAndNextAction),
     ("hanhua-arbitration-blocks-overlapping-jobs", HanhuaArbitrationBlocksOverlappingJobs),
+    ("hanhua-sessions-queue-when-the-running-slot-is-full", HanhuaSessionsQueueWhenTheRunningSlotIsFull),
+    ("hanhua-session-store-roundtrip", HanhuaSessionStoreRoundtrip),
     ("hanhua-gpu-need-depends-on-engine-and-phase", HanhuaGpuNeedDependsOnEngineAndPhase),
     ("hanhua-fill-uses-galtransl-profile-and-env", HanhuaFillUsesGaltranslProfileAndEnv),
     ("hanhua-job-store-keeps-active-and-caps-history", HanhuaJobStoreKeepsActiveAndCapsHistory),
@@ -679,7 +681,7 @@ static void VideoSessionStoreRoundTrip()
 
 static void VideoJobSlotPolicyReservesFutureParallel()
 {
-    Equal(1, VideoJobSlotPolicy.DefaultMaxParallelJobs, "8GB default must stay single-job until hardware allows more");
+    Equal(1, VideoJobSlotPolicy.DefaultMaxParallelJobs, "this machine runs one video job; a higher cap is a parameter");
     Equal(true, VideoJobSlotPolicy.CanStart(runningCount: 0), "idle workspace can start the first video job");
     Equal(false, VideoJobSlotPolicy.CanStart(runningCount: 1), "a second video job must wait while one is running");
     Equal(true, VideoJobSlotPolicy.CanStart(runningCount: 1, maxParallel: 2), "raising the cap later must allow a second window job");
@@ -4347,8 +4349,13 @@ static void HanhuaGameCommandLocalAndAliyun()
         Equal("sakura-galtransl-7b-v3-7", local.Environment[HanhuaCommand.LocalModelEnv], "local game fill model comes from settings");
         var custom = HanhuaCommand.Game(settings with { HanhuaFillProfileId = "my-fill" }, HanhuaEngine.LocalQwen, game);
         Equal("my-fill", custom.Environment[HanhuaCommand.LocalModelEnv], "custom hanhua fill profile must flow into HANHUA_LOCAL_MODEL");
-        var unset = HanhuaCommand.Game(settings with { HanhuaFillProfileId = "" }, HanhuaEngine.LocalQwen, game);
+        Equal(false, local.Environment.ContainsKey(HanhuaCommand.LocalPortEnv), "chat and fill share no port until the fill profile port is passed");
+        var onFillPort = HanhuaCommand.Game(settings, HanhuaEngine.LocalQwen, game, localPort: 18136);
+        Equal("18136", onFillPort.Environment[HanhuaCommand.LocalPortEnv], "fill launch must use the profile port, which is not the chat port 18135");
+        Equal("sakura-galtransl-7b-v3-7", onFillPort.Environment[HanhuaCommand.LocalModelEnv], "the fill port travels with the fill model");
+        var unset = HanhuaCommand.Game(settings with { HanhuaFillProfileId = "" }, HanhuaEngine.LocalQwen, game, localPort: 18136);
         Equal(false, unset.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "empty fill profile must not pin a hardcoded model");
+        Equal(false, unset.Environment.ContainsKey(HanhuaCommand.LocalPortEnv), "empty fill profile must not publish a port");
         Equal(false, local.Environment.Keys.Any(key => key.Contains("key", StringComparison.OrdinalIgnoreCase)
             || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
             || key.Contains("token", StringComparison.OrdinalIgnoreCase)), "hanhua env must not carry secrets");
@@ -4483,6 +4490,8 @@ static void HanhuaImageCommandsOrderAndEngine()
         Equal("sakura-galtransl-7b-v3-7", fillLocal.Environment[HanhuaCommand.LocalModelEnv], "local fill model comes from settings");
         var customFill = HanhuaCommand.ImageFill(settings with { HanhuaFillProfileId = "my-fill" }, HanhuaEngine.LocalQwen, work);
         Equal("my-fill", customFill.Environment[HanhuaCommand.LocalModelEnv], "image fill must honor the selected fill profile");
+        var imageOnFillPort = HanhuaCommand.ImageFill(settings, HanhuaEngine.LocalQwen, work, localPort: 18136);
+        Equal("18136", imageOnFillPort.Environment[HanhuaCommand.LocalPortEnv], "image fill must use the profile port, which is not the chat port 18135");
         Equal(false, fillCloud.Environment.ContainsKey(HanhuaCommand.LocalModelEnv), "aliyun fill does not pin a local model");
     }
     finally { Directory.Delete(root, recursive: true); }
@@ -4785,10 +4794,84 @@ static void HanhuaArbitrationBlocksOverlappingJobs()
     Equal("汉化任务正在运行，请先等待完成或取消后再发送。", HanhuaArbitration.RefuseChat(true), "chat send blocked while hanhua runs");
     Equal<string?>(null, HanhuaArbitration.RefuseChat(false), "chat send allowed when hanhua idle");
     Equal("汉化任务正在运行，请先等待完成或取消后再生成视频。", HanhuaArbitration.RefuseVideo(true), "video blocked while hanhua runs");
-    Equal("仍有聊天回复正在生成，请先在对应会话停止后再开始汉化。", HanhuaArbitration.RefuseHanhua(false, true, false), "hanhua blocked while chat generates");
-    Equal("视频仍在生成，请先等待完成或取消视频任务。", HanhuaArbitration.RefuseHanhua(false, false, true), "hanhua blocked while video generates");
-    Equal("已有汉化任务在运行。", HanhuaArbitration.RefuseHanhua(true, false, false), "second hanhua job blocked");
-    Equal<string?>(null, HanhuaArbitration.RefuseHanhua(false, false, false), "idle surfaces may start hanhua");
+    Equal("仍有聊天回复正在生成，请先在对应会话停止后再开始汉化。", HanhuaArbitration.RefuseHanhua(true, false), "hanhua blocked while chat generates");
+    Equal("视频仍在生成，请先等待完成或取消视频任务。", HanhuaArbitration.RefuseHanhua(false, true), "hanhua blocked while video generates");
+    Equal<string?>(null, HanhuaArbitration.RefuseHanhua(false, false), "another hanhua session is queued by the slot policy, not refused");
+}
+
+static void HanhuaSessionsQueueWhenTheRunningSlotIsFull()
+{
+    Equal(1, HanhuaSlotPolicy.DefaultMaxParallelJobs, "this machine runs one hanhua job");
+    Equal(false, HanhuaSlotPolicy.CanStart(1), "a second start waits while the single slot is taken");
+    Equal(true, HanhuaSlotPolicy.CanStart(0), "an idle slot can start");
+    Equal(true, HanhuaSlotPolicy.CanStart(1, maxParallel: 2), "a configured cap of 2 starts the next job");
+
+    var running = new HanhuaJob(
+        "run", HanhuaKind.Game, HanhuaEngine.LocalQwen, HanhuaPhase.Translate, HanhuaJobStatus.Running,
+        @"D:\games\RunningBook", null, null, 1, 4, null, null, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+    var done = new HanhuaJob(
+        "done", HanhuaKind.Image, HanhuaEngine.Aliyun, HanhuaPhase.Typeset, HanhuaJobStatus.Succeeded,
+        @"D:\manga\DoneBook", null, null, 8, 8, null, null, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+    var workspace = HanhuaSessionWorkspace.FromJobs([running, done]);
+    Equal(2, workspace.Sessions.Count, "each saved job is a session");
+    Equal("RunningBook", workspace.Active.Title, "the running job is the session that opens");
+    Equal("run", workspace.Active.JobId, "the open session points at the running job");
+
+    var draft = workspace.NewSession();
+    Equal(HanhuaSession.DraftTitle, draft.Title, "a new session starts without a folder");
+    Equal(draft.Id, workspace.Active.Id, "the new session becomes current");
+    Equal(3, workspace.Sessions.Count, "older sessions stay in the list");
+    Equal(true, workspace.Delete(draft.Id), "a draft can be deleted while another session remains");
+    Equal(2, workspace.Sessions.Count, "deleting the draft leaves the saved jobs");
+    Equal(true, workspace.Delete(workspace.Active.Id), "one saved job can be removed while another remains");
+    Equal(false, workspace.Delete(workspace.Active.Id), "the last session stays");
+    Equal(1, workspace.Sessions.Count, "delete stops at one session");
+
+    var queue = new SessionJobQueue<HanhuaQueuedStart>(item => item.SessionId);
+    var first = new HanhuaQueuedStart("s1", @"D:\games\One", HanhuaKind.Game, HanhuaEngine.LocalQwen, false);
+    var second = new HanhuaQueuedStart("s2", @"D:\manga\Two", HanhuaKind.Image, HanhuaEngine.Aliyun, false);
+    Equal(1, queue.Enqueue(first), "the first waiting task is position 1");
+    Equal(2, queue.Enqueue(second), "the next task keeps its place");
+    Equal("排队中，当前任务结束后开始。", SessionJobQueue<HanhuaQueuedStart>.FormatStatus(1), "hanhua uses the same queue copy as chat and video");
+    Equal(first, queue.Dequeue(), "the earlier session starts first");
+}
+
+static void HanhuaSessionStoreRoundtrip()
+{
+    var root = Path.Combine(Path.GetTempPath(), $"hanhua-sessions-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(root);
+    try
+    {
+        var workspace = HanhuaSessionWorkspace.FromJobs([]);
+        var draft = workspace.Active;
+        workspace.Remember(draft with { SourcePath = @"D:\games\One", Title = "One" });
+        var second = workspace.NewSession();
+        var queue = new[]
+        {
+            new HanhuaQueuedStart(second.Id, @"D:\manga\Two", HanhuaKind.Image, HanhuaEngine.Aliyun, false),
+        };
+        var path = Path.Combine(root, "hanhua-sessions.json");
+        var store = new HanhuaSessionStore(path);
+        store.Save(workspace, queue);
+
+        var loaded = store.Load([]);
+        Equal(2, loaded.Workspace.Sessions.Count, "both hanhua sessions reload");
+        Equal(second.Id, loaded.Workspace.Active.Id, "the active hanhua session reloads");
+        Equal("One", loaded.Workspace.Sessions.First(session => session.Id == draft.Id).Title, "an edited title reloads");
+        Equal(second.Id, loaded.Queue[0].SessionId, "the waiting task reloads behind the running slot");
+        Equal(false, loaded.Queue[0].CatchUp, "a fresh queued task is not catch-up");
+
+        var extra = new HanhuaJob(
+            "extra", HanhuaKind.Game, HanhuaEngine.LocalQwen, HanhuaPhase.Translate, HanhuaJobStatus.Interrupted,
+            @"D:\games\ExtraBook", null, null, 0, 0, null, null, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
+        var merged = store.Load([extra]);
+        Equal(true, merged.Workspace.Sessions.Any(session => session.JobId == "extra"), "a saved job missing from the session file still appears");
+        Equal(second.Id, merged.Workspace.Active.Id, "merging an older job does not steal the open session");
+    }
+    finally
+    {
+        try { Directory.Delete(root, recursive: true); } catch { /* temp cleanup */ }
+    }
 }
 
 static void HanhuaGpuNeedDependsOnEngineAndPhase()

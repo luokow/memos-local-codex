@@ -35,6 +35,7 @@ public sealed partial class MainPage : Page
     private readonly ConversationSessionWorkspace _sessions = new();
     private bool _suppressSessionPicker;
     private bool _suppressVideoSessionPicker;
+    private bool _suppressHanhuaSessionPicker;
     private AppPaths? _paths;
     private SettingsStore? _settingsStore;
     private ModelServiceConfigStore? _modelConfigStore;
@@ -69,6 +70,7 @@ public sealed partial class MainPage : Page
     /// <summary>Last conversation that used llama-server. Switching threads must drop that slot KV.</summary>
     private string? _lastModelSessionId;
     private string? _hanhuaLaunchNotice;
+    private ModelLifecycleState _chatModelState = ModelLifecycleState.NotStarted;
 
     private enum ExpandedEditorMode { Chat, Video, ReadOnly }
 
@@ -87,14 +89,20 @@ public sealed partial class MainPage : Page
         ChatFooterHost.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
         ChatToolsHost.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
         VideoSessionToolsHost.Visibility = video ? Visibility.Visible : Visibility.Collapsed;
+        HanhuaSessionToolsHost.Visibility = hanhua ? Visibility.Visible : Visibility.Collapsed;
         TextModelToolsHost.Visibility = video ? Visibility.Collapsed : Visibility.Visible;
         VideoToolsHost.Visibility = video ? Visibility.Visible : Visibility.Collapsed;
         QwenStatusBorder.Visibility = video ? Visibility.Collapsed : Visibility.Visible;
         VideoStatusBorder.Visibility = video ? Visibility.Visible : Visibility.Collapsed;
         NoticeText.Visibility = chat ? Visibility.Visible : Visibility.Collapsed;
+        if (hanhua)
+            UpdateTextModelStatus(_hanhuaFillManager is null ? ModelLifecycleState.NotStarted : ModelLifecycleState.Ready, role: "填字");
+        else if (chat)
+            UpdateTextModelStatus(_chatModelState);
+        ShowWorkspaceEndpoint();
         ToolTipService.SetToolTip(
             StartTextModelPageButton,
-            hanhua ? "填字阶段会自动启动本机模型，一般不用点这里。" : null);
+            hanhua ? "启动汉化填字模型。开始汉化时也会自动启动。" : null);
         if (video) VideoPanel.RefreshPresetSummary();
         else if (chat) UpdateChatComposerLayout();
     }
@@ -160,6 +168,7 @@ public sealed partial class MainPage : Page
         HanhuaPanel.GpuNeedChanged += HanhuaPanel_GpuNeedChanged;
         VideoPanel.ExpandedTextRequested += ShowVideoExpandedText;
         VideoPanel.SessionsChanged += (_, _) => RefreshVideoSessionPicker();
+        HanhuaPanel.SessionsChanged += (_, _) => RefreshHanhuaSessionPicker();
         SettingsPanel.Closed += (_, _) =>
         {
             if (_settingsOpenedForVideo) VideoPanel.FocusSettingsButton();
@@ -199,7 +208,8 @@ public sealed partial class MainPage : Page
                 PickHanhuaFolderAsync,
                 PersistHanhuaEngine,
                 _paths.LocalChatRoot,
-                () => _modelProfiles?.FindHanhuaFillProfile(_settings.HanhuaFillProfileId)?.Service.ModelAlias);
+                () => _modelProfiles?.FindHanhuaFillProfile(_settings.HanhuaFillProfileId)?.Service.ModelAlias,
+                () => _modelProfiles?.FindHanhuaFillProfile(_settings.HanhuaFillProfileId)?.Service.Port);
             if (modelConfigLoad.Migrated) _settingsStore.Save(_settings);
             _initializationStage = "创建模型客户端";
             CreateModelClients(_settings);
@@ -228,6 +238,7 @@ public sealed partial class MainPage : Page
 
             RefreshSessionPicker();
             RefreshVideoSessionPicker();
+            RefreshHanhuaSessionPicker();
             _initializationStage = "准备模型服务";
             UpdateTextModelStatus(ModelLifecycleState.NotStarted);
             UpdateVideoModelStatus(new(ModelLifecycleState.NotStarted));
@@ -465,10 +476,9 @@ public sealed partial class MainPage : Page
         _modelManager = new QwenServiceManager(options, new WindowsModelProcessLauncher());
         _chatClient = new QwenChatClient(options.ChatCompletionsUri);
         _activeModelSettings = settings;
-        var textProfile = _modelProfiles.Resolve(settings.SelectedTextProfileId);
         var videoProfile = _videoProfiles.Resolve(settings.SelectedVideoProfileId);
         EndpointText.Text = $"LOCAL CORE  /  {_modelConfig.BindHost}:{_modelConfig.Port}";
-        TextModelSummaryText.Text = $"{textProfile.DisplayName}  {_modelConfig.BindHost}:{_modelConfig.Port}";
+        ShowWorkspaceEndpoint();
         ChatComposerMetaText.Text = FormatTextComposerMeta(settings);
         VideoModelSummaryText.Text = $"{videoProfile.DisplayName}  {videoProfile.Service.BindHost}:{videoProfile.Service.Port}";
         if (App.Window is MainWindow window) window.SetEndpointSubtitle(_modelConfig.BindHost, _modelConfig.Port);
@@ -568,7 +578,7 @@ public sealed partial class MainPage : Page
             await _modelManager.EnsureAvailableAsync(cancellationToken);
             if (!await _modelManager.IsHealthyAsync(cancellationToken))
                 throw new InvalidOperationException("本机填字模型没能自动启动，填字无法继续。");
-            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused, role: "填字");
             return;
         }
         if (need == HanhuaGpuNeed.GalTransl)
@@ -597,7 +607,7 @@ public sealed partial class MainPage : Page
             await _modelManager.EnsureAvailableAsync(cancellationToken);
             if (!await _modelManager.IsHealthyAsync(cancellationToken))
                 throw new InvalidOperationException("本机填字模型没能自动启动，填字无法继续。");
-            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused, role: "填字");
             return;
         }
         if (_paths is null) throw new InvalidOperationException("文本模型尚未初始化。");
@@ -608,14 +618,14 @@ public sealed partial class MainPage : Page
             await _modelManager.EnsureAvailableAsync(cancellationToken);
             if (!await _modelManager.IsHealthyAsync(cancellationToken))
                 throw new InvalidOperationException("汉化填字模型没能自动启动。");
-            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+            UpdateTextModelStatus(_modelManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused, role: "填字");
             return;
         }
         if (_modelManager is not null)
             await _modelManager.StopServiceAsync(cancellationToken);
         if (_hanhuaFillManager is not null && await _hanhuaFillManager.IsHealthyAsync(cancellationToken))
         {
-            UpdateTextModelStatus(_hanhuaFillManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+            UpdateTextModelStatus(_hanhuaFillManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused, role: "填字");
             return;
         }
         await StopHanhuaFillModelAsync(cancellationToken);
@@ -628,7 +638,8 @@ public sealed partial class MainPage : Page
         await _hanhuaFillManager.EnsureAvailableAsync(cancellationToken);
         if (!await _hanhuaFillManager.IsHealthyAsync(cancellationToken))
             throw new InvalidOperationException("汉化填字模型没能自动启动。");
-        UpdateTextModelStatus(_hanhuaFillManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused);
+        UpdateTextModelStatus(_hanhuaFillManager.OwnsModel ? ModelLifecycleState.Ready : ModelLifecycleState.Reused, role: "填字");
+        SetNotice($"填字模型只监听 {fillProfile.Service.BindHost}:{fillProfile.Service.Port}。", MutedText);
     }
 
     private async Task StopHanhuaFillModelAsync(CancellationToken cancellationToken)
@@ -711,7 +722,7 @@ public sealed partial class MainPage : Page
             if (videoProfileChanged || videoProfileEdited)
                 await VideoPanel.ResetProfileAsync(stopModel: VideoPanel.HasInitializedRuntime);
             VideoPanel.RefreshPresetSummary();
-            TextModelSummaryText.Text = $"{selectedText.DisplayName}  {candidateModelConfig.BindHost}:{candidateModelConfig.Port}";
+            ShowWorkspaceEndpoint();
             ChatComposerMetaText.Text = FormatTextComposerMeta(candidate);
             VideoModelSummaryText.Text = $"{selectedVideo.DisplayName}  {selectedVideo.Service.BindHost}:{selectedVideo.Service.Port}";
             ApplySessionSortMode(candidate.ResolveSessionSortMode());
@@ -986,7 +997,12 @@ public sealed partial class MainPage : Page
             return;
         }
         UpdateTextModelStatus(ModelLifecycleState.Starting);
-        try { if (_settings.EnforceTextVideoModelExclusivity) await VideoPanel.ReleaseModelAsync(); await InitializeModelAsync(throwOnFailure: true); }
+        try
+        {
+            await StopHanhuaFillModelAsync(CancellationToken.None);
+            if (_settings.EnforceTextVideoModelExclusivity) await VideoPanel.ReleaseModelAsync();
+            await InitializeModelAsync(throwOnFailure: true);
+        }
         catch { }
     }
 
@@ -1009,22 +1025,55 @@ public sealed partial class MainPage : Page
         catch (Exception error) { UpdateVideoModelStatus(new(ModelLifecycleState.Failed, $"释放失败：{error.Message}")); }
     }
 
-    private async void StartTextModelPageButton_Click(object sender, RoutedEventArgs e) => await StartTextModelAsync();
+    private async void StartTextModelPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ModeSelector.SelectedItem == HanhuaModeItem)
+        {
+            try { await EnsureHanhuaFillModelAsync(CancellationToken.None); }
+            catch (Exception error)
+            {
+                UpdateTextModelStatus(ModelLifecycleState.Failed, error.Message, "填字");
+                SetNotice($"填字模型启动失败：{error.Message}", ErrorText);
+            }
+            return;
+        }
+        await StartTextModelAsync();
+    }
 
     private async void StartVideoModelPageButton_Click(object sender, RoutedEventArgs e) => await StartVideoModelAsync();
 
-    private void UpdateTextModelStatus(ModelLifecycleState state, string? detail = null)
+    private void ShowWorkspaceEndpoint()
     {
+        if (TextModelSummaryText is null || _modelProfiles is null || _modelConfig is null) return;
+        if (ModeSelector.SelectedItem == HanhuaModeItem)
+        {
+            var fill = _modelProfiles.FindHanhuaFillProfile(_settings.HanhuaFillProfileId);
+            if (fill is not null)
+            {
+                TextModelSummaryText.Text = $"{fill.DisplayName}  {fill.Service.BindHost}:{fill.Service.Port}";
+                return;
+            }
+        }
+        var textProfile = _modelProfiles.Resolve(_settings.SelectedTextProfileId);
+        TextModelSummaryText.Text = $"{textProfile.DisplayName}  {_modelConfig.BindHost}:{_modelConfig.Port}";
+    }
+
+    private void UpdateTextModelStatus(ModelLifecycleState state, string? detail = null, string role = "聊天")
+    {
+        if (role == "聊天")
+            _chatModelState = state;
+        var name = role + "模型";
         var (text, color, busy, ready) = state switch
         {
-            ModelLifecycleState.Starting when detail == "正在释放" => ("• 聊天模型正在释放", WarningText, true, false),
-            ModelLifecycleState.Starting => ("• 聊天模型正在启动", WarningText, true, false),
-            ModelLifecycleState.Ready => ("• 聊天模型已启动", PrimaryText, false, true),
-            ModelLifecycleState.Reused => ("• 聊天模型已复用", PrimaryText, false, true),
-            ModelLifecycleState.Failed => ("× 聊天模型启动失败", ErrorText, false, false),
-            ModelLifecycleState.Released => ("○ 聊天模型已释放", MutedText, false, false),
-            _ => ("○ 聊天模型未启动", MutedText, false, false),
+            ModelLifecycleState.Starting when detail == "正在释放" => ($"• {name}正在释放", WarningText, true, false),
+            ModelLifecycleState.Starting => ($"• {name}正在启动", WarningText, true, false),
+            ModelLifecycleState.Ready => ($"• {name}已启动", PrimaryText, false, true),
+            ModelLifecycleState.Reused => ($"• {name}已复用", PrimaryText, false, true),
+            ModelLifecycleState.Failed => ($"× {name}启动失败", ErrorText, false, false),
+            ModelLifecycleState.Released => ($"○ {name}已释放", MutedText, false, false),
+            _ => ($"○ {name}未启动", MutedText, false, false),
         };
+        if (QwenStatusText is null || StartTextModelPageButton is null) return;
         SetStatus(QwenStatusText, text, color);
         StartTextModelPageButton.Content = busy ? "启动中" : ready ? "已启动" : state == ModelLifecycleState.Failed ? "重试" : "启动";
         StartTextModelPageButton.IsEnabled = !busy && !ready && !HanhuaPanel.IsBusy;
@@ -2565,6 +2614,58 @@ public sealed partial class MainPage : Page
             : VideoPanel.HasRunningJob
                 ? $"当前视频窗口：{selected.Title}（另一窗口仍在生成）"
                 : $"当前视频窗口：{selected.Title}", MutedText);
+    }
+
+    private void RefreshHanhuaSessionPicker()
+    {
+        _suppressHanhuaSessionPicker = true;
+        try
+        {
+            HanhuaSessionPicker.ItemsSource = null;
+            HanhuaSessionPicker.ItemsSource = HanhuaPanel.Sessions.ToList();
+            HanhuaSessionPicker.DisplayMemberPath = nameof(HanhuaSession.Title);
+            HanhuaSessionPicker.SelectedItem = HanhuaPanel.Sessions.FirstOrDefault(session => session.Id == HanhuaPanel.ActiveSession.Id);
+        }
+        finally
+        {
+            _suppressHanhuaSessionPicker = false;
+        }
+    }
+
+    private void NewHanhuaSessionButton_Click(object sender, RoutedEventArgs e)
+    {
+        HanhuaPanel.NewSession();
+        RefreshHanhuaSessionPicker();
+        SetNotice(HanhuaPanel.IsBusy
+            ? "已新建汉化任务。上一本继续跑，这本会排队。"
+            : "已新建汉化任务。", MutedText);
+    }
+
+    private void DeleteHanhuaSessionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!HanhuaPanel.DeleteActiveSession(out var blocked))
+        {
+            SetNotice(blocked ?? "至少保留一个汉化任务。", WarningText);
+            return;
+        }
+        RefreshHanhuaSessionPicker();
+        SetNotice("已删除汉化任务。", MutedText);
+    }
+
+    private void HanhuaSessionPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressHanhuaSessionPicker) return;
+        if (HanhuaSessionPicker.SelectedItem is not HanhuaSession selected) return;
+        if (selected.Id == HanhuaPanel.ActiveSession.Id) return;
+        if (!HanhuaPanel.TryActivateSession(selected.Id))
+        {
+            RefreshHanhuaSessionPicker();
+            return;
+        }
+        RefreshHanhuaSessionPicker();
+        SetNotice(HanhuaPanel.IsBusy
+            ? $"当前汉化任务：{selected.Title}（另一本仍在运行或排队）"
+            : $"当前汉化任务：{selected.Title}", MutedText);
     }
 
     private async void ExportButton_Click(object sender, RoutedEventArgs e)

@@ -25,6 +25,7 @@ public sealed partial class HanhuaPanel : UserControl
     private readonly Stopwatch _elapsed = new();
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _elapsedTicker;
     private HanhuaJobStore? _store;
+    private HanhuaSessionStore? _sessionStore;
     private Func<LocalChatSettings>? _settings;
     private Func<bool>? _chatBusy;
     private Func<bool>? _videoBusy;
@@ -32,10 +33,16 @@ public sealed partial class HanhuaPanel : UserControl
     private Func<string, Task<string?>>? _pickFolder;
     private Action<HanhuaEngine>? _persistEngine;
     private Func<string?>? _fillModel;
+    private Func<int?>? _fillPort;
     private CancellationTokenSource? _runCts;
     private HanhuaJob? _job;
     private IReadOnlyList<HanhuaPhase>? _runPhases;
     private bool _suppressEngine;
+    private HanhuaSessionWorkspace _sessions = HanhuaSessionWorkspace.FromJobs([]);
+    private readonly SessionJobQueue<HanhuaQueuedStart> _queue = new(item => item.SessionId);
+    private readonly Dictionary<string, List<string>> _sessionLogs = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _sessionStatus = new(StringComparer.Ordinal);
+    private string? _runningSessionId;
 
     public HanhuaPanel()
     {
@@ -47,6 +54,10 @@ public sealed partial class HanhuaPanel : UserControl
 
     public bool IsBusy => _job?.Status is HanhuaJobStatus.Running or HanhuaJobStatus.Cancelling;
     public bool HasInterruptedWork { get; private set; }
+    public event EventHandler? SessionsChanged;
+    public IReadOnlyList<HanhuaSession> Sessions => _sessions.Sessions;
+    public HanhuaSession ActiveSession => _sessions.Active;
+    private bool ViewingRunning => IsBusy && _runningSessionId == _sessions.Active.Id;
     public string? InterruptedWorkSummary { get; private set; }
     private TimeSpan DisplayElapsed => _elapsed.Elapsed;
 
@@ -61,7 +72,8 @@ public sealed partial class HanhuaPanel : UserControl
         Func<string, Task<string?>> pickFolder,
         Action<HanhuaEngine> persistEngine,
         string localChatRoot,
-        Func<string?>? fillModel = null)
+        Func<string?>? fillModel = null,
+        Func<int?>? fillPort = null)
     {
         _settings = settings;
         _chatBusy = chatBusy;
@@ -70,6 +82,7 @@ public sealed partial class HanhuaPanel : UserControl
         _pickFolder = pickFolder;
         _persistEngine = persistEngine;
         _fillModel = fillModel;
+        _fillPort = fillPort;
         _store = new HanhuaJobStore(HanhuaJobStore.DefaultPath(localChatRoot));
         _suppressEngine = true;
         SelectTagged(EngineBox, HanhuaEngineCodec.ToJson(HanhuaEngineCodec.Parse(settings().HanhuaEngine)));
@@ -108,7 +121,112 @@ public sealed partial class HanhuaPanel : UserControl
                 }
             }
         }
+        _sessionStore = new HanhuaSessionStore(Path.Combine(localChatRoot, "data", "hanhua-sessions.json"));
+        var restored = _sessionStore.Load(_store.Load().Jobs);
+        _sessions = restored.Workspace;
+        _queue.ReplaceAll(restored.Queue);
+        if (_job is not null)
+        {
+            var match = _sessions.Sessions.FirstOrDefault(session => session.JobId == _job.Id);
+            if (match is not null) _sessions.Select(match.Id);
+        }
+        else
+        {
+            ApplyActiveSessionToForm();
+        }
+        PersistSessions();
         UpdateButtons();
+        SessionsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void PersistSessions()
+        => _sessionStore?.Save(_sessions, _queue.Items);
+
+    public void NewSession()
+    {
+        CaptureActiveForm();
+        _sessions.NewSession();
+        ApplyActiveSessionToForm();
+        PersistSessions();
+        SessionsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public bool DeleteActiveSession(out string? blocked)
+    {
+        if (ViewingRunning)
+        {
+            blocked = "先取消正在运行的汉化，再删除这个任务。";
+            return false;
+        }
+        var active = _sessions.Active;
+        if (!_sessions.Delete(active.Id))
+        {
+            blocked = "至少保留一个汉化任务。";
+            return false;
+        }
+        _queue.Remove(active.Id);
+        if (active.JobId is not null) _store?.Remove(active.JobId);
+        _sessionLogs.Remove(active.Id);
+        _sessionStatus.Remove(active.Id);
+        blocked = null;
+        ApplyActiveSessionToForm();
+        PersistSessions();
+        SessionsChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    public bool TryActivateSession(string id)
+    {
+        if (_sessions.Sessions.All(session => session.Id != id)) return false;
+        if (id == _sessions.Active.Id) return true;
+        CaptureActiveForm();
+        _sessions.Select(id);
+        ApplyActiveSessionToForm();
+        PersistSessions();
+        return true;
+    }
+
+    private void CaptureActiveForm()
+    {
+        if (_sessions.Sessions.Count == 0) return;
+        var active = _sessions.Active;
+        _sessionLogs[active.Id] = _log.ToList();
+        _sessionStatus[active.Id] = HanhuaStatusBox.Text;
+        _sessions.Remember(active with
+        {
+            SourcePath = SourcePathBox.Text.Trim(),
+            Kind = SelectedKind,
+            Engine = SelectedEngine,
+            Title = HanhuaSession.TitleFor(SourcePathBox.Text),
+        });
+    }
+
+    private void ApplyActiveSessionToForm()
+    {
+        var active = _sessions.Active;
+        SourcePathBox.Text = active.SourcePath;
+        _suppressEngine = true;
+        SelectTagged(KindBox, active.Kind == HanhuaKind.Image ? "image" : "game");
+        SelectTagged(EngineBox, HanhuaEngineCodec.ToJson(active.Engine));
+        _suppressEngine = false;
+        _log.Clear();
+        if (_sessionLogs.TryGetValue(active.Id, out var lines))
+        {
+            foreach (var line in lines) _log.Add(line);
+        }
+        HanhuaEmptyState.Visibility = _log.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(DisplayedJob()?.OutputPath);
+        if (ViewingRunning) ApplyProgressUi();
+        else SetIdleStatus(_sessionStatus.TryGetValue(active.Id, out var status) ? status : "等待开始");
+        UpdateButtons();
+    }
+
+    private HanhuaJob? DisplayedJob()
+    {
+        if (ViewingRunning) return _job;
+        var jobId = _sessions.Sessions.Count == 0 ? null : _sessions.Active.JobId;
+        if (jobId is null || _store is null) return null;
+        return _store.Load().Jobs.FirstOrDefault(job => job.Id == jobId);
     }
 
     private void RestoreJob(HanhuaJob job, string status)
@@ -138,6 +256,8 @@ public sealed partial class HanhuaPanel : UserControl
         return HanhuaCommand.ResolveFillModel(settings, fromCatalog);
     }
 
+    private int? FillPort() => _fillPort?.Invoke();
+
     private async void PickFolderButton_Click(object sender, RoutedEventArgs e)
     {
         if (_pickFolder is null || IsBusy) return;
@@ -166,7 +286,7 @@ public sealed partial class HanhuaPanel : UserControl
 
     private async void StartOrCancel_Click(object sender, RoutedEventArgs e)
     {
-        if (IsBusy) { await CancelAsync(); return; }
+        if (ViewingRunning) { await CancelAsync(); return; }
         if (ShouldPromptDuplicateStart())
         {
             ShowDuplicateConfirm();
@@ -204,7 +324,7 @@ public sealed partial class HanhuaPanel : UserControl
 
     private void OpenOutputButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_job?.OutputPath is not { Length: > 0 } output) return;
+        if (DisplayedJob()?.OutputPath is not { Length: > 0 } output) return;
         try
         {
             var unityBat = Path.Combine(output, "点我启动汉化版.bat");
@@ -241,10 +361,11 @@ public sealed partial class HanhuaPanel : UserControl
     private HanhuaJob? CatchUpTarget()
     {
         var source = SourcePathBox.Text.Trim();
-        if (HanhuaCatchUp.CanCatchUp(_job)
+        var displayed = DisplayedJob();
+        if (HanhuaCatchUp.CanCatchUp(displayed)
             && (string.IsNullOrWhiteSpace(source)
-                || HanhuaCatchUp.SameSource(_job!.SourcePath, source)))
-            return _job;
+                || HanhuaCatchUp.SameSource(displayed!.SourcePath, source)))
+            return displayed;
         if (_store is null || string.IsNullOrWhiteSpace(source))
             return null;
         var fromStore = HanhuaCatchUp.Latest(
@@ -287,8 +408,13 @@ public sealed partial class HanhuaPanel : UserControl
         var kind = SelectedKind;
         var engine = SelectedEngine;
         var source = SourcePathBox.Text.Trim();
-        var blocked = HanhuaArbitration.RefuseHanhua(IsBusy, _chatBusy?.Invoke() == true, _videoBusy?.Invoke() == true);
+        var blocked = HanhuaArbitration.RefuseHanhua(_chatBusy?.Invoke() == true, _videoBusy?.Invoke() == true);
         if (blocked is not null) { SetIdleStatus(blocked); return; }
+        if (IsBusy && !HanhuaSlotPolicy.CanStart(1))
+        {
+            QueueActiveStart(kind, engine, source, catchUp);
+            return;
+        }
         HanhuaJob job;
         if (catchUp)
         {
@@ -327,11 +453,15 @@ public sealed partial class HanhuaPanel : UserControl
                 source = HanhuaCommand.ResolveUnityRoot(source) ?? source;
             _runPhases = unity ? HanhuaCommand.UnityPhases : HanhuaCommand.Phases(kind);
 
-            var resume = _job is { CanResume: true }
-                && HanhuaCatchUp.SameSource(_job.SourcePath, source)
-                && _job.Kind == kind;
-            job = resume
-                ? _job! with { Status = HanhuaJobStatus.Running, Engine = _job.Engine, Error = null, UpdatedUtc = DateTimeOffset.UtcNow }
+            var current = DisplayedJob();
+            var queued = current is { Status: HanhuaJobStatus.Queued }
+                && HanhuaCatchUp.SameSource(current.SourcePath, source)
+                && current.Kind == kind;
+            var resume = current is { CanResume: true }
+                && HanhuaCatchUp.SameSource(current.SourcePath, source)
+                && current.Kind == kind;
+            job = queued || resume
+                ? current! with { Status = HanhuaJobStatus.Running, Engine = engine, Error = null, Message = "开始汉化", UpdatedUtc = DateTimeOffset.UtcNow }
                 : new HanhuaJob(
                     Guid.NewGuid().ToString("N")[..12],
                     kind,
@@ -344,6 +474,18 @@ public sealed partial class HanhuaPanel : UserControl
         }
         _job = job;
         _store.Upsert(job);
+        var active = _sessions.Active;
+        _sessions.Remember(active with
+        {
+            JobId = job.Id,
+            SourcePath = source,
+            Kind = kind,
+            Engine = job.Engine,
+            Title = HanhuaSession.TitleFor(source),
+        });
+        _runningSessionId = active.Id;
+        PersistSessions();
+        SessionsChanged?.Invoke(this, EventArgs.Empty);
         _runCts = new CancellationTokenSource();
         _detail.Clear();
         DispatcherQueue.TryEnqueue(() => _log.Clear());
@@ -368,7 +510,7 @@ public sealed partial class HanhuaPanel : UserControl
                     await RunUnityAsync(settings, job, source, _runCts.Token);
             }
             else if (kind == HanhuaKind.Game)
-                await RunLaunchAsync(HanhuaCommand.Game(settings, job.Engine, source, FillModel(settings)), job.Engine, HanhuaPhase.Translate, _runCts.Token);
+                await RunLaunchAsync(HanhuaCommand.Game(settings, job.Engine, source, FillModel(settings), FillPort()), job.Engine, HanhuaPhase.Translate, _runCts.Token);
             else if (catchUp)
                 await RunImageCatchUpAsync(settings, job, _runCts.Token);
             else
@@ -395,8 +537,67 @@ public sealed partial class HanhuaPanel : UserControl
             GpuNeedChanged?.Invoke(this, new(HanhuaGpuNeed.None, null));
             _runCts?.Dispose();
             _runCts = null;
+            var ended = _runningSessionId;
+            _runningSessionId = null;
             UpdateButtons();
+            if (ended is not null)
+                await StartNextQueuedAsync();
         }
+    }
+
+    private void QueueActiveStart(HanhuaKind kind, HanhuaEngine engine, string source, bool catchUp)
+    {
+        if (string.IsNullOrWhiteSpace(source) || !Directory.Exists(source))
+        {
+            SetIdleStatus("请先选择有效的源目录。");
+            return;
+        }
+        var active = _sessions.Active;
+        var existing = DisplayedJob();
+        var job = existing is { Status: HanhuaJobStatus.Queued }
+            ? existing with { SourcePath = source, Kind = kind, Engine = engine, UpdatedUtc = DateTimeOffset.UtcNow }
+            : new HanhuaJob(
+                Guid.NewGuid().ToString("N")[..12],
+                kind,
+                engine,
+                kind == HanhuaKind.Game ? HanhuaPhase.Copy : HanhuaPhase.Ocr,
+                HanhuaJobStatus.Queued,
+                source,
+                null,
+                null,
+                0,
+                0,
+                null,
+                null,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow);
+        var position = _queue.Enqueue(new HanhuaQueuedStart(active.Id, source, kind, engine, catchUp));
+        var message = SessionJobQueue<HanhuaQueuedStart>.FormatStatus(position);
+        job = job with { Message = message };
+        _store?.Upsert(job);
+        _sessions.Remember(active with
+        {
+            JobId = job.Id,
+            SourcePath = source,
+            Kind = kind,
+            Engine = engine,
+            Title = HanhuaSession.TitleFor(source),
+        });
+        SetIdleStatus(message);
+        PersistSessions();
+        SessionsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task StartNextQueuedAsync()
+    {
+        if (IsBusy || _chatBusy?.Invoke() == true || _videoBusy?.Invoke() == true) return;
+        var next = _queue.Dequeue();
+        if (next is null || _sessions.Sessions.All(session => session.Id != next.SessionId)) return;
+        CaptureActiveForm();
+        _sessions.Select(next.SessionId);
+        ApplyActiveSessionToForm();
+        SessionsChanged?.Invoke(this, EventArgs.Empty);
+        await StartAsync(next.CatchUp);
     }
 
     private async Task RunUnityAsync(LocalChatSettings settings, HanhuaJob job, string source, CancellationToken cancellationToken)
@@ -412,7 +613,7 @@ public sealed partial class HanhuaPanel : UserControl
         if (job.Engine == HanhuaEngine.LocalQwen && HanhuaCommand.UnityHasDump(root))
         {
             await RunLaunchAsync(
-                HanhuaCommand.Unity(settings, job.Engine, root, fill: true, FillModel(settings)),
+                HanhuaCommand.Unity(settings, job.Engine, root, fill: true, FillModel(settings), FillPort()),
                 job.Engine,
                 HanhuaPhase.Translate,
                 cancellationToken);
@@ -425,7 +626,7 @@ public sealed partial class HanhuaPanel : UserControl
     {
         var root = HanhuaCommand.ResolveUnityRoot(source) ?? source;
         await RunLaunchAsync(
-            HanhuaCommand.Unity(settings, job.Engine, root, fill: true, FillModel(settings)),
+            HanhuaCommand.Unity(settings, job.Engine, root, fill: true, FillModel(settings), FillPort()),
             job.Engine,
             HanhuaPhase.Translate,
             cancellationToken);
@@ -440,9 +641,9 @@ public sealed partial class HanhuaPanel : UserControl
         _job = job with { WorkPath = work, UpdatedUtc = DateTimeOffset.UtcNow };
         var phases = new (HanhuaPhase Phase, HanhuaLaunch Launch)[]
         {
-            (HanhuaPhase.Ocr, HanhuaCommand.ImageOcr(settings, job.SourcePath, work)),
-            (HanhuaPhase.Fill, HanhuaCommand.ImageFill(settings, job.Engine, work, FillModel(settings))),
-            (HanhuaPhase.Typeset, HanhuaCommand.ImageTypeset(settings, work)),
+            (HanhuaPhase.Ocr, HanhuaCommand.AttachLocalPort(HanhuaCommand.ImageOcr(settings, job.SourcePath, work), FillPort())),
+            (HanhuaPhase.Fill, HanhuaCommand.ImageFill(settings, job.Engine, work, FillModel(settings), FillPort())),
+            (HanhuaPhase.Typeset, HanhuaCommand.AttachLocalPort(HanhuaCommand.ImageTypeset(settings, work), FillPort())),
         };
         var startIndex = Math.Max(0, Array.FindIndex(phases, item => item.Phase == job.Phase));
         for (var i = startIndex; i < phases.Length; i++)
@@ -465,9 +666,9 @@ public sealed partial class HanhuaPanel : UserControl
             cancellationToken.ThrowIfCancellationRequested();
             var launch = phase switch
             {
-                HanhuaPhase.Ocr => HanhuaCommand.ImageOcrCatchUp(settings, job.SourcePath, work),
-                HanhuaPhase.Fill => HanhuaCommand.ImageFill(settings, job.Engine, work, FillModel(settings)),
-                HanhuaPhase.Typeset => HanhuaCommand.ImageTypesetCatchUp(settings, work),
+                HanhuaPhase.Ocr => HanhuaCommand.AttachLocalPort(HanhuaCommand.ImageOcrCatchUp(settings, job.SourcePath, work), FillPort()),
+                HanhuaPhase.Fill => HanhuaCommand.ImageFill(settings, job.Engine, work, FillModel(settings), FillPort()),
+                HanhuaPhase.Typeset => HanhuaCommand.AttachLocalPort(HanhuaCommand.ImageTypesetCatchUp(settings, work), FillPort()),
                 _ => throw new InvalidOperationException(phase.ToString()),
             };
             await RunLaunchAsync(launch, job.Engine, phase, cancellationToken);
@@ -543,8 +744,13 @@ public sealed partial class HanhuaPanel : UserControl
             _job.Kind, phase, status, message, _job.Done, _job.Total);
         _job = _job with { Status = status, Phase = phase, Message = display, Error = status == HanhuaJobStatus.Failed ? message : null, UpdatedUtc = DateTimeOffset.UtcNow };
         _store?.Upsert(_job);
+        PersistSessions();
         AppendLog(display);
-        SetIdleStatus(HanhuaProgressStatus.FormatFinished(display, DisplayElapsed));
+        var finished = HanhuaProgressStatus.FormatFinished(display, DisplayElapsed);
+        if (_runningSessionId is not null)
+            _sessionStatus[_runningSessionId] = OneLine(finished);
+        if (_runningSessionId is null || _sessions.Sessions.Count == 0 || _runningSessionId == _sessions.Active.Id)
+            SetIdleStatus(finished);
         HasInterruptedWork = false;
         InterruptedWorkSummary = null;
         OpenHanhuaOutputButton.IsEnabled = !string.IsNullOrWhiteSpace(_job.OutputPath);
@@ -555,6 +761,18 @@ public sealed partial class HanhuaPanel : UserControl
     {
         _detail.AppendLine(line);
         if (IsNoiseLog(line)) return;
+        var owner = _runningSessionId;
+        if (!string.IsNullOrEmpty(owner) && _sessions.Sessions.Count > 0 && owner != _sessions.Active.Id)
+        {
+            if (!_sessionLogs.TryGetValue(owner, out var bucket))
+            {
+                bucket = [];
+                _sessionLogs[owner] = bucket;
+            }
+            bucket.Add(line);
+            if (bucket.Count > 400) bucket.RemoveAt(0);
+            return;
+        }
         DispatcherQueue.TryEnqueue(() =>
         {
             _log.Add(line);
@@ -602,6 +820,7 @@ public sealed partial class HanhuaPanel : UserControl
     private void ApplyProgressUi()
     {
         if (_job is null) return;
+        if (_runningSessionId is not null && _sessions.Sessions.Count > 0 && _runningSessionId != _sessions.Active.Id) return;
         var live = HanhuaProgressStatus.FromJob(_job, DisplayElapsed, _runPhases);
         HanhuaStatusBox.Text = OneLine(live.StatusText);
         HanhuaJobProgress.Visibility = Visibility.Visible;
@@ -634,7 +853,7 @@ public sealed partial class HanhuaPanel : UserControl
 
     private void UpdateButtons()
     {
-        var busy = IsBusy;
+        var busy = ViewingRunning;
         CancelHanhuaButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ComposerStartButton.Content = busy ? "取消" : "开始汉化";
         KindBox.IsEnabled = !busy;

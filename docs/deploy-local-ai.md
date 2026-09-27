@@ -128,7 +128,7 @@ Get-FileHash models\Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf -Algor
 
 同一仓库还有更小的 `Sakura-Galtransl-7B-v3.7-IQ4_XS.gguf`，换文件后改 `model_path`。
 
-填字走 `http://127.0.0.1:18135/v1/chat/completions`。模型别名不可包含 `qwen-mt`（否则会走 MT 协议、剥掉 `system`）。不要起 `qwen_mt_proxy.py` / 端口 `18765`。
+填字走填字档案自己的回环地址，不必和聊天口相同。客户端把该端口写入 `HANHUA_LOCAL_PORT`；脚本没收到时仍连 `127.0.0.1:18135`。模型别名不可包含 `qwen-mt`（否则会走 MT 协议、剥掉 `system`）。不要起 `qwen_mt_proxy.py` / 端口 `18765`。
 
 ### 视频（可选）
 

@@ -4,6 +4,7 @@ public static class HanhuaCommand
 {
     public const string MitRootEnv = "HANHUA_MIT_ROOT";
     public const string LocalModelEnv = "HANHUA_LOCAL_MODEL";
+    public const string LocalPortEnv = "HANHUA_LOCAL_PORT";
     public const string CloudConfigEnv = "HANHUA_CLOUD_CONFIG";
 
     public static string? ResolveFillModel(LocalChatSettings settings, string? localModel = null)
@@ -94,10 +95,11 @@ public static class HanhuaCommand
         LocalChatSettings settings,
         HanhuaEngine engine,
         string gamePath,
-        string? localModel = null)
+        string? localModel = null,
+        int? localPort = null)
     {
         if (LooksLikeUnity(gamePath))
-            return Unity(settings, engine, gamePath, fill: engine == HanhuaEngine.LocalQwen, localModel);
+            return Unity(settings, engine, gamePath, fill: engine == HanhuaEngine.LocalQwen, localModel, localPort);
         var launch = Python(
             settings,
             "one_click_rm.py",
@@ -106,7 +108,7 @@ public static class HanhuaCommand
                 : ["--progress-jsonl", gamePath]);
         if (engine != HanhuaEngine.LocalQwen)
             return WithCloudConfig(launch, settings);
-        return WithFillModel(launch, settings, localModel);
+        return WithFillModel(launch, settings, localModel, localPort);
     }
 
     public static HanhuaLaunch Unity(
@@ -114,7 +116,8 @@ public static class HanhuaCommand
         HanhuaEngine engine,
         string gamePath,
         bool fill,
-        string? localModel = null)
+        string? localModel = null,
+        int? localPort = null)
     {
         var root = ResolveUnityRoot(gamePath) ?? Path.GetFullPath(gamePath);
         var args = new List<string> { "--progress-jsonl" };
@@ -125,7 +128,7 @@ public static class HanhuaCommand
             return WithCloudConfig(launch, settings);
         if (!fill)
             return launch;
-        return WithFillModel(launch, settings, localModel);
+        return WithFillModel(launch, settings, localModel, localPort);
     }
 
     public static HanhuaLaunch ImageOcr(LocalChatSettings settings, string sourcePath, string workPath)
@@ -138,7 +141,8 @@ public static class HanhuaCommand
         LocalChatSettings settings,
         HanhuaEngine engine,
         string workPath,
-        string? localModel = null)
+        string? localModel = null,
+        int? localPort = null)
     {
         var launch = Python(
             settings,
@@ -148,7 +152,7 @@ public static class HanhuaCommand
                 : ["--progress-jsonl", workPath]);
         if (engine == HanhuaEngine.Aliyun)
             return WithCloudConfig(launch, settings);
-        return WithFillModel(launch, settings, localModel);
+        return WithFillModel(launch, settings, localModel, localPort);
     }
 
     public static HanhuaLaunch ImageTypeset(LocalChatSettings settings, string workPath)
@@ -201,7 +205,7 @@ public static class HanhuaCommand
         }
     }
 
-    private static HanhuaLaunch WithFillModel(HanhuaLaunch launch, LocalChatSettings settings, string? localModel)
+    private static HanhuaLaunch WithFillModel(HanhuaLaunch launch, LocalChatSettings settings, string? localModel, int? localPort = null)
     {
         var model = ResolveFillModel(settings, localModel);
         if (model is null)
@@ -209,6 +213,17 @@ public static class HanhuaCommand
         var env = new Dictionary<string, string>(launch.Environment, StringComparer.Ordinal)
         {
             [LocalModelEnv] = model,
+        };
+        return AttachLocalPort(launch with { Environment = env }, localPort);
+    }
+
+    public static HanhuaLaunch AttachLocalPort(HanhuaLaunch launch, int? localPort)
+    {
+        if (localPort is not (> 0 and <= 65535) || launch.Environment.ContainsKey(LocalPortEnv))
+            return launch;
+        var env = new Dictionary<string, string>(launch.Environment, StringComparer.Ordinal)
+        {
+            [LocalPortEnv] = localPort.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
         return launch with { Environment = env };
     }

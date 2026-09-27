@@ -168,7 +168,7 @@ def translate_mapping(
             ok, detail = local_qwen.probe()
             if not ok:
                 raise RuntimeError(
-                    "local Qwen not listening on 127.0.0.1:18135 ("
+                    f"local model not listening on 127.0.0.1:{local_qwen.LOCAL_PORT} ("
                     + detail
                     + "). Open Local AI first; do not start MiniMax H3."
                 )

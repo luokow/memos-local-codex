@@ -268,7 +268,7 @@ def translate_one(src_arg: Path, *, dry_run: bool, engine: str = "mt") -> int:
         log("没有需要翻的句子（可能已经汉化过）。")
     else:
         if engine == "local":
-            log("翻译走本地 Qwen 对话口 127.0.0.1:18135。先开 Local AI，不要同时开 MiniMax H3。")
+            log(f"翻译走填字口 127.0.0.1:{local_qwen.LOCAL_PORT}。先开 Local AI，不要同时开 MiniMax H3。")
         else:
             conf = translate_direct.cloud_config_path()
             if not conf.is_file():
