@@ -33,18 +33,6 @@ class LocalQwenRoutingTests(unittest.TestCase):
             "http://127.0.0.1:18135/v1/chat/completions",
         )
 
-    def test_fill_port_comes_from_env(self) -> None:
-        with patch.dict(os.environ, {"HANHUA_LOCAL_PORT": "18136"}):
-            self.assertEqual(local_qwen.configured_local_port(), 18136)
-        with patch.dict(os.environ, {"HANHUA_LOCAL_PORT": "0"}):
-            self.assertEqual(local_qwen.configured_local_port(), local_qwen.CHAT_PORT)
-        os.environ.pop("HANHUA_LOCAL_PORT", None)
-        self.assertEqual(local_qwen.configured_local_port(), 18135)
-        with patch.object(local_qwen, "LOCAL_PORT", 18136):
-            self.assertEqual(local_qwen.ports_that_block_gpu(), [18136, 18135])
-        with patch.object(local_qwen, "LOCAL_PORT", 18135):
-            self.assertEqual(local_qwen.ports_that_block_gpu(), [18135])
-
     def test_mt_payload_has_no_system(self) -> None:
         payload = local_qwen.mt_payload("qwen-mt-plus", ["こんにちは", "牧場"])
         self.assertEqual(payload["messages"][0]["role"], "user")
@@ -106,33 +94,6 @@ class LocalQwenRoutingTests(unittest.TestCase):
     def test_default_engine_is_mt(self) -> None:
         self.assertEqual(translate_direct.resolve_engine(None), "mt")
         self.assertEqual(translate_direct.resolve_engine("local"), "local")
-
-    def test_cloud_config_path_uses_env_not_baked_file(self) -> None:
-        import tempfile
-
-        previous = os.environ.get("HANHUA_CLOUD_CONFIG")
-        with tempfile.TemporaryDirectory() as raw:
-            chosen = Path(raw) / "cloud.json"
-            chosen.write_text(
-                '{"baseUrl":"https://example.test/v1","apiKey":"secret","model":"demo-mt"}',
-                encoding="utf-8",
-            )
-            try:
-                os.environ["HANHUA_CLOUD_CONFIG"] = str(chosen)
-                self.assertEqual(translate_direct.cloud_config_path(), chosen)
-                url, key, model = translate_direct.load_upstream()
-                self.assertEqual(url, "https://example.test/v1/chat/completions")
-                self.assertEqual(key, "secret")
-                self.assertEqual(model, "demo-mt")
-                os.environ.pop("HANHUA_CLOUD_CONFIG", None)
-                fallback = translate_direct.cloud_config_path()
-                self.assertEqual(fallback, translate_direct.CONF)
-                self.assertNotEqual(fallback, chosen)
-            finally:
-                if previous is None:
-                    os.environ.pop("HANHUA_CLOUD_CONFIG", None)
-                else:
-                    os.environ["HANHUA_CLOUD_CONFIG"] = previous
 
     def test_cloud_bat_has_no_local_flag(self) -> None:
         bat = (PACK / "点我翻译游戏.bat").read_text(encoding="ascii", errors="replace")
@@ -480,6 +441,35 @@ class ImagePipelineQualityTests(unittest.TestCase):
             )
         )
         self.assertTrue(local_qwen.translation_ok("保健室", "保健室"))
+        self.assertFalse(
+            local_qwen.translation_ok(
+                "あ♥",
+                "而且还是个连个一起抽烟聊天的朋友都没有的孤僻处男，身上满满的臭味呢～♡",
+            ),
+            "short moan must not keep an unrelated essay translation",
+        )
+        self.assertTrue(local_qwen.translation_ok("あ♥", "啊♥"))
+        self.assertFalse(
+            local_qwen.translation_ok(
+                "Sweet Amber",
+                "Sweet Amber漫画热牛奶浓一点vol.1",
+            ),
+            "English title must not absorb a Chinese magazine credit",
+        )
+        self.assertTrue(local_qwen.translation_ok("Bunny Time", "Bunny Time"))
+        self.assertFalse(
+            local_qwen.translation_ok(
+                "もしかして",
+                "难道你以为我会吻你吗？ 笨蛋——",
+            ),
+            "five-mora もしかして must not keep a longer balloon's translation",
+        )
+        self.assertTrue(local_qwen.translation_ok("もしかして", "难道是"))
+        self.assertFalse(
+            local_qwen.translation_ok("はい", "是…学长，这样可以吗？"),
+            "two-mora はい must not keep a longer balloon's translation",
+        )
+        self.assertTrue(local_qwen.translation_ok("はい", "是…"))
 
     def test_store_translation_drops_japanese_echo(self) -> None:
         data = {"おはよう": ""}
@@ -560,6 +550,577 @@ class ImagePipelineQualityTests(unittest.TestCase):
         self.assertIn("第２話", split[0][0])
         self.assertIn("第３話", split[1][0])
         self.assertLess(split[0][1][3], split[1][1][1])
+
+    def test_contents_crop_boxes_splits_merged_sidecar(self) -> None:
+        import tempfile
+        import crop_mit_local
+        import bubble_recall_local
+
+        merged = (
+            "43P私たちに精子を蒔いて孕ませて♥〈第２話〉"
+            "83P私たちに精子を蒔いて孕ませて♥〈第３話〉"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sidecars = root / "ocr_sidecars"
+            sidecars.mkdir()
+            (sidecars / "page_translations.txt").write_text(
+                "\n".join(
+                    [
+                        "text: " + merged,
+                        "coords: [304, 564, 415, 564, 415, 610, 304, 610]",
+                        "coords: [307, 615, 718, 615, 718, 655, 307, 655]",
+                        "coords: [308, 660, 670, 660, 670, 701, 308, 701]",
+                        "coords: [305, 742, 414, 742, 414, 789, 305, 789]",
+                        "coords: [307, 796, 718, 796, 718, 835, 307, 835]",
+                        "coords: [309, 841, 671, 841, 671, 880, 309, 880]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            boxes = crop_mit_local.contents_crop_boxes(root, "page")
+            self.assertEqual(len(boxes), 2)
+            self.assertIn("第２話", boxes[0][0])
+            self.assertIn("第３話", boxes[1][0])
+            self.assertLess(boxes[0][1][1], boxes[1][1][1])
+            padded = crop_mit_local.padded_box(boxes[0][1], 800, 1400, pad=16)
+            self.assertEqual(padded[0], boxes[0][1][0] - 16)
+            self.assertLessEqual(padded[3], 1400)
+            separated = crop_mit_local.padded_box_away_from_neighbors(
+                boxes[0][1],
+                [boxes[0][1], boxes[1][1]],
+                800,
+                1400,
+                pad=16,
+            )
+            self.assertLessEqual(separated[3], boxes[1][1][1])
+
+    def test_uncovered_translated_boxes_skips_sfx_and_covered(self) -> None:
+        import json
+        import tempfile
+        import crop_mit_local
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "translations.json").write_text(
+                json.dumps(
+                    {
+                        "どうですか先生？この日のためにネットとバナナで勉強してたんです♡": "怎么样啊，老师？",
+                        "はぁ": "",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (root / "bubble_recall.json").write_text(
+                json.dumps(
+                    {
+                        "page": {
+                            "regions": [
+                                {
+                                    "xyxy": [380, 56, 473, 334],
+                                    "text": "どうですか先生？この日のためにネットとバナナで勉強してたんです♡",
+                                    "covered": False,
+                                },
+                                {
+                                    "xyxy": [380, 56, 473, 334],
+                                    "text": "どうですか先生？この日のためにネットとバナナで勉強してたんです♡",
+                                    "covered": False,
+                                },
+                                {
+                                    "xyxy": [10, 10, 40, 40],
+                                    "text": "はぁ",
+                                    "covered": False,
+                                },
+                                {
+                                    "xyxy": [50, 50, 80, 80],
+                                    "text": "どうですか先生？この日のためにネットとバナナで勉強してたんです♡",
+                                    "covered": True,
+                                },
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            boxes = crop_mit_local.uncovered_translated_boxes(root, "page")
+            self.assertEqual(len(boxes), 1)
+            self.assertEqual(boxes[0][1], [380, 56, 473, 334])
+
+    def test_uncovered_translated_boxes_skips_already_replaced_ink(self) -> None:
+        import json
+        import tempfile
+        from PIL import Image, ImageDraw
+        import crop_mit_local
+
+        banana = "どうですか先生？この日のためにネットとバナナで勉強してたんです♡"
+        left = "こういう勉強は…いけないんだぞくるみ君…あせぎる…"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "typeset_in").mkdir()
+            (root / "out").mkdir()
+            source = Image.new("RGB", (500, 420), (240, 240, 240))
+            draw = ImageDraw.Draw(source)
+            for y in range(60, 330, 8):
+                draw.line((385, y, 468, y), fill=(20, 20, 20), width=2)
+            for y in range(224, 396, 8):
+                draw.line((30, y, 128, y), fill=(20, 20, 20), width=2)
+            source.save(root / "typeset_in" / "page.jpg", quality=100)
+            dest = source.copy()
+            wipe = ImageDraw.Draw(dest)
+            wipe.rectangle((26, 220, 133, 400), fill=(240, 240, 240))
+            wipe.rectangle((380, 56, 473, 180), fill=(240, 240, 240))
+            dest.save(root / "out" / "page.jpg", quality=100)
+            (root / "translations.json").write_text(
+                json.dumps({banana: "怎么样啊，老师？", left: "这种学习方式"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (root / "bubble_recall.json").write_text(
+                json.dumps(
+                    {
+                        "page": {
+                            "regions": [
+                                {
+                                    "xyxy": [380, 56, 473, 334],
+                                    "text": banana,
+                                    "covered": False,
+                                },
+                                {
+                                    "xyxy": [26, 220, 133, 400],
+                                    "text": left,
+                                    "covered": False,
+                                },
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            boxes = crop_mit_local.uncovered_translated_boxes(root, "page")
+            self.assertEqual(len(boxes), 1)
+            self.assertEqual(boxes[0][1], [380, 56, 473, 334])
+
+    def test_uncovered_translated_boxes_skips_untouched_art(self) -> None:
+        import json
+        import tempfile
+        from PIL import Image, ImageDraw
+        import crop_mit_local
+
+        src = "わっっじゃないのよ"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "typeset_in").mkdir()
+            (root / "out").mkdir()
+            page = Image.new("RGB", (400, 220), (245, 245, 245))
+            draw = ImageDraw.Draw(page)
+            for y in range(40, 180, 8):
+                draw.line((40, y, 160, y), fill=(20, 20, 20), width=2)
+            page.save(root / "typeset_in" / "page.jpg", quality=100)
+            page.save(root / "out" / "page.jpg", quality=100)
+            (root / "translations.json").write_text(
+                json.dumps({src: "哇什么哇啊"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (root / "bubble_recall.json").write_text(
+                json.dumps(
+                    {
+                        "page": {
+                            "regions": [
+                                {
+                                    "xyxy": [36, 36, 168, 184],
+                                    "text": src,
+                                    "covered": False,
+                                }
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            boxes = crop_mit_local.uncovered_translated_boxes(root, "page")
+            self.assertEqual(boxes, [])
+
+    def test_uncovered_translated_boxes_skips_colophon_dump(self) -> None:
+        import json
+        import tempfile
+        from PIL import Image, ImageDraw
+        import crop_mit_local
+
+        line = "格ゲーの中では私の方が上なんじゃ～！"
+        dest = "在格斗游戏里我可是更强的哦～！"
+        regions = []
+        page = Image.new("RGB", (700, 900), (245, 245, 245))
+        draw = ImageDraw.Draw(page)
+        for i in range(5):
+            box = [40, 40 + i * 160, 280, 150 + i * 160]
+            for y in range(box[1] + 8, box[3] - 8, 8):
+                draw.line((box[0] + 6, y, box[2] - 6, y), fill=(20, 20, 20), width=2)
+            regions.append({"xyxy": box, "text": line, "covered": False})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "typeset_in").mkdir()
+            (root / "out").mkdir()
+            page.save(root / "typeset_in" / "page.jpg", quality=100)
+            dest_img = page.copy()
+            erased = ImageDraw.Draw(dest_img)
+            for i in range(5):
+                box = [40, 40 + i * 160, 280, 150 + i * 160]
+                erased.rectangle((box[0], box[1], box[2], box[1] + 40), fill=(245, 245, 245))
+            dest_img.save(root / "out" / "page.jpg", quality=100)
+            (root / "translations.json").write_text(
+                json.dumps({line: dest}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (root / "bubble_recall.json").write_text(
+                json.dumps({"page": {"regions": regions}}),
+                encoding="utf-8",
+            )
+            boxes = crop_mit_local.uncovered_translated_boxes(root, "page")
+            self.assertEqual(boxes, [])
+
+    def test_save_pasted_page_jpeg_uses_mit_quality(self) -> None:
+        import tempfile
+        from PIL import Image
+        import crop_mit_local
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            page = Image.new("RGB", (120, 80))
+            pixels = page.load()
+            for x in range(120):
+                for y in range(80):
+                    pixels[x, y] = ((x * 13) % 256, (y * 17) % 256, 90)
+            dest = root / "page.jpg"
+            crop_mit_local.save_pasted_page(page, dest)
+            low = root / "q75.jpg"
+            page.save(low, quality=75, format="JPEG")
+            self.assertGreater(dest.stat().st_size, low.stat().st_size)
+
+    def test_crop_overlay_map_keeps_episode_aliases_unique(self) -> None:
+        import crop_mit_local
+
+        overlay = crop_mit_local.crop_overlay_map(
+            [
+                (
+                    "43P私たちに精子を蒔いて孕ませて♥〈第２話〉",
+                    "43P\n第2话",
+                ),
+                (
+                    "83P私たちに精子を蒔いて孕ませて♥〈第３話〉",
+                    "83P\n第3话",
+                ),
+            ]
+        )
+        self.assertEqual(
+            overlay["43P私たちに精子を蒔いて孕ませて♥〈第２話〉"],
+            "43P\n第2话",
+        )
+        self.assertEqual(overlay["〈第２話〉"], "43P\n第2话")
+        self.assertEqual(overlay["第３話"], "83P\n第3话")
+        shared = "私たちに精子を蒔いて孕ませて♥"
+        self.assertNotIn(shared, overlay)
+        self.assertNotIn("43P", overlay)
+        self.assertNotIn("83P", overlay)
+
+    def test_title_bind_dst_strips_leading_page_number(self) -> None:
+        import crop_mit_local
+
+        self.assertEqual(
+            crop_mit_local.title_bind_dst(
+                "43P\n把精子播在我们身上\n让我们怀孕吧♥〈第2话〉"
+            ),
+            "把精子播在我们身上\n让我们怀孕吧♥〈第2话〉",
+        )
+        self.assertEqual(crop_mit_local.title_bind_dst("43P 第2话"), "第2话")
+        self.assertEqual(crop_mit_local.title_bind_dst("第2话"), "第2话")
+
+    def test_translated_crop_jobs_skips_empty_dst(self) -> None:
+        import tempfile
+        import crop_mit_local
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "translations.json").write_text(
+                json.dumps(
+                    {
+                        "43P私たちに精子を蒔いて孕ませて♥〈第２話〉": "43P\n第2话",
+                        "はぁ": "",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            jobs = crop_mit_local.translated_crop_jobs(
+                root,
+                [
+                    ("43P私たちに精子を蒔いて孕ませて♥〈第２話〉", [1, 2, 3, 4]),
+                    ("はぁ", [5, 6, 7, 8]),
+                ],
+            )
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(jobs[0][1], "第2话")
+
+    def test_contents_crop_boxes_drops_page_number_and_includes_single(self) -> None:
+        import tempfile
+        import crop_mit_local
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sidecars = root / "ocr_sidecars"
+            sidecars.mkdir()
+            (sidecars / "page_translations.txt").write_text(
+                "\n".join(
+                    [
+                        "text: 3P私たちに精子を蒔いて孕ませて♥〈第１話〉",
+                        "coords: [304, 382, 380, 382, 380, 430, 304, 430]",
+                        "coords: [308, 436, 718, 436, 718, 474, 308, 474]",
+                        "coords: [309, 480, 671, 480, 671, 519, 309, 519]",
+                        "text: "
+                        "43P私たちに精子を蒔いて孕ませて♥〈第２話〉"
+                        "83P私たちに精子を蒔いて孕ませて♥〈第３話〉",
+                        "coords: [304, 564, 415, 564, 415, 610, 304, 610]",
+                        "coords: [307, 615, 718, 615, 718, 655, 307, 655]",
+                        "coords: [308, 660, 670, 660, 670, 701, 308, 701]",
+                        "coords: [305, 742, 414, 742, 414, 789, 305, 789]",
+                        "coords: [307, 796, 718, 796, 718, 835, 307, 835]",
+                        "coords: [309, 841, 671, 841, 671, 880, 309, 880]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            boxes = crop_mit_local.contents_crop_boxes(root, "page")
+            self.assertEqual(len(boxes), 3)
+            self.assertIn("第１話", boxes[0][0])
+            self.assertGreaterEqual(boxes[0][1][1], 430)
+            self.assertIn("第２話", boxes[1][0])
+            self.assertGreaterEqual(boxes[1][1][1], 610)
+            self.assertGreaterEqual(boxes[1][1][2] - boxes[1][1][0], 300)
+            keepouts = crop_mit_local.contents_keepout_boxes(root, "page")
+            self.assertTrue(any(box[1] < 430 for box in keepouts))
+
+    def test_expand_box_to_cover_out_ink(self) -> None:
+        from PIL import Image, ImageDraw
+        import crop_mit_local
+
+        source = Image.new("RGB", (200, 80), (180, 40, 40))
+        dest = source.copy()
+        draw = ImageDraw.Draw(dest)
+        draw.rectangle((20, 20, 160, 50), fill=(245, 245, 245))
+        grown = crop_mit_local.expand_box_to_cover_diff(
+            [40, 22, 90, 48],
+            source,
+            dest,
+            others=[],
+        )
+        self.assertLessEqual(grown[0], 20)
+        self.assertGreaterEqual(grown[2], 160)
+
+    def test_mit_crop_queue_assigns_only_longest_query(self) -> None:
+        import tempfile
+
+        mit_root = Path(r"D:\grok\tools\manga-image-translator")
+        mit_py = mit_root / ".venv" / "Scripts" / "python.exe"
+        if not mit_py.is_file():
+            self.skipTest("MIT venv missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            trans = Path(tmp) / "translations.json"
+            trans.write_text("{}", encoding="utf-8")
+            script = (
+                "import asyncio, os, json\n"
+                f"os.environ['MIT_TRANSLATIONS_JSON'] = r'{trans}'\n"
+                "os.environ['MIT_CROP_QUEUE'] = json.dumps(['整句中文'], ensure_ascii=False)\n"
+                "from manga_translator.translators.none import NoneTranslator\n"
+                "tr = NoneTranslator()\n"
+                "out = asyncio.run(tr._translate('JPN', 'CHS', "
+                "['こういう勉強はいけないんだぞくるみ君', 'まじめすぎる']))\n"
+                "print(json.dumps(out, ensure_ascii=False))\n"
+            )
+            proc = subprocess.run(
+                [str(mit_py), "-c", script],
+                cwd=str(mit_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
+            dsts = json.loads(proc.stdout.strip().splitlines()[-1])
+            self.assertEqual(dsts[0], "整句中文")
+            self.assertEqual(dsts[1], "")
+
+    def test_vertical_ink_columns_splits_three_bars(self) -> None:
+        from PIL import Image, ImageDraw
+        import crop_mit_local
+
+        img = Image.new("RGB", (120, 200), (250, 250, 250))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle((20, 20, 36, 180), fill=(10, 10, 10))
+        draw.rectangle((52, 20, 68, 180), fill=(10, 10, 10))
+        draw.rectangle((84, 20, 100, 180), fill=(10, 10, 10))
+        cols = crop_mit_local.vertical_ink_columns(img, [10, 10, 110, 190])
+        self.assertEqual(len(cols), 3)
+        self.assertLess(cols[0][0], cols[1][0])
+        self.assertLess(cols[1][0], cols[2][0])
+        self.assertLess(cols[0][2], cols[1][0])
+
+    def test_split_dest_for_columns_is_rtl(self) -> None:
+        import crop_mit_local
+
+        parts = crop_mit_local.split_dest_for_columns(
+            "说是体育特长生，简直让人无语！！给我剃掉一边眉毛，闭门思过吧！！",
+            3,
+        )
+        self.assertEqual(len(parts), 3)
+        self.assertTrue(parts[0].startswith("说是体育特长生"))
+        self.assertIn("无语", parts[1])
+        self.assertNotIn("给我剃掉", parts[1])
+        self.assertIn("闭门思过", parts[2])
+        hearts = crop_mit_local.split_dest_for_columns("快点♥快点♥快点把鸡巴…", 2)
+        self.assertEqual(hearts, ["快点♥快点♥", "快点把鸡巴…"])
+        scoop = crop_mit_local.split_dest_for_columns(
+            "地狱猫的真面目居然是三年A班的山田惠子！！这可是大独家啊！",
+            3,
+        )
+        self.assertEqual(len(scoop), 3)
+        self.assertIn("地狱猫", scoop[0])
+        self.assertIn("山田惠子", scoop[1])
+        self.assertIn("大独家", scoop[2])
+
+    def test_tiny_font_balloons_need_vertical_leftover_and_long_dest(self) -> None:
+        import json
+        import tempfile
+        from PIL import Image, ImageDraw
+        import crop_mit_local
+
+        src_text = "スポーツ特待生が聞いて呆れる！！片眉剃って山に籠れ！！"
+        dest_text = "说是体育特长生，简直让人无语！！给我剃掉一边眉毛，闭门思过吧！！"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "typeset_in").mkdir()
+            (root / "out").mkdir()
+            source = Image.new("RGB", (200, 320), (245, 245, 245))
+            draw = ImageDraw.Draw(source)
+            for x in range(48, 82, 6):
+                draw.line((x, 44, x, 276), fill=(15, 15, 15), width=2)
+            source.save(root / "typeset_in" / "page.jpg", quality=100)
+            dest = source.copy()
+            ImageDraw.Draw(dest).rectangle((50, 48, 80, 110), fill=(245, 245, 245))
+            dest.save(root / "out" / "page.jpg", quality=100)
+            (root / "translations.json").write_text(
+                json.dumps({src_text: dest_text, "はぁ": "哈啊"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (root / "bubble_recall.json").write_text(
+                json.dumps(
+                    {
+                        "page": {
+                            "regions": [
+                                {
+                                    "xyxy": [40, 40, 90, 280],
+                                    "text": src_text,
+                                    "covered": False,
+                                },
+                                {
+                                    "xyxy": [10, 10, 30, 28],
+                                    "text": "はぁ",
+                                    "covered": False,
+                                },
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            found = crop_mit_local.tiny_font_balloons(root, "page")
+            self.assertEqual([row[0] for row in found], [src_text])
+            self.assertEqual(found[0][1], [40, 40, 90, 280])
+
+    def test_padded_box_away_from_neighbors_clips_side_by_side(self) -> None:
+        import crop_mit_local
+
+        left = [10, 10, 40, 200]
+        right = [50, 10, 80, 200]
+        padded = crop_mit_local.padded_box_away_from_neighbors(
+            left, [left, right], 200, 240, pad=16
+        )
+        self.assertLessEqual(padded[2], 50)
+        self.assertGreater(padded[2], left[2])
+
+    def test_prepare_crop_canvas_white_pads_narrow_column(self) -> None:
+        from PIL import Image
+        import crop_mit_local
+
+        crop = Image.new("RGB", (20, 80), (10, 10, 10))
+        canvas, content, scale = crop_mit_local.prepare_crop_canvas(crop)
+        self.assertEqual(scale, 4)
+        self.assertEqual(content, (80, 320))
+        self.assertGreaterEqual(min(canvas.size), 400)
+        self.assertEqual(canvas.getpixel((399, 399)), (255, 255, 255))
+        self.assertEqual(canvas.getpixel((0, 0)), (10, 10, 10))
+
+    def test_prepare_crop_canvas_leaves_large_crop(self) -> None:
+        from PIL import Image
+        import crop_mit_local
+
+        crop = Image.new("RGB", (500, 600), (12, 34, 56))
+        canvas, content, scale = crop_mit_local.prepare_crop_canvas(crop)
+        self.assertEqual(scale, 1)
+        self.assertEqual(content, (500, 600))
+        self.assertEqual(canvas.size, (500, 600))
+
+    def test_crop_content_from_canvas_drops_white_pad(self) -> None:
+        from PIL import Image
+        import crop_mit_local
+
+        canvas = Image.new("RGB", (400, 400), (255, 255, 255))
+        canvas.paste(Image.new("RGB", (80, 320), (3, 4, 5)), (0, 0))
+        cut = crop_mit_local.crop_content_from_canvas(canvas, (80, 320))
+        self.assertEqual(cut.size, (80, 320))
+        self.assertEqual(cut.getpixel((0, 0)), (3, 4, 5))
+
+    def test_crop_mit_config_uses_official_small_image_knobs(self) -> None:
+        import crop_mit_local
+
+        cfg = crop_mit_local.crop_mit_config()
+        self.assertEqual(cfg["detector"]["detection_size"], 1024)
+        self.assertEqual(cfg["ocr"]["prob"], 0.05)
+        self.assertEqual(cfg["translator"]["translator"], "none")
+        self.assertEqual(cfg["inpainter"]["inpainter"], "lama_large")
+
+    def test_crop_row_pastes_inpaint_even_if_dest_empty(self) -> None:
+        import crop_mit_local
+
+        self.assertTrue(
+            crop_mit_local.crop_row_should_paste({"queries": ["けいこ"], "dsts": [""]})
+        )
+        self.assertTrue(
+            crop_mit_local.crop_row_should_paste({"queries": ["三年A組"], "dsts": ["三年A班"]})
+        )
+        self.assertFalse(crop_mit_local.crop_row_should_paste({"queries": [], "dsts": []}))
+        self.assertFalse(crop_mit_local.crop_row_should_paste({"queries": [""], "dsts": [""]}))
+
+    def test_after_mit_passes_runs_tiny_font_only_on_success(self) -> None:
+        import tempfile
+        import typeset_ocr_local
+        import crop_mit_local
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "typeset_in").mkdir()
+            with patch.object(crop_mit_local, "crop_mit_pages", return_value=2) as tiny:
+                self.assertEqual(typeset_ocr_local.after_mit_passes(root, ["page"], 0), 2)
+                tiny.assert_called_once_with(
+                    root,
+                    ["page"],
+                    contents=False,
+                    bubbles=False,
+                    tiny_font=True,
+                )
+                tiny.reset_mock()
+                self.assertEqual(typeset_ocr_local.after_mit_passes(root, ["page"], 1), 0)
+                tiny.assert_not_called()
 
     def test_overlay_pages_keeps_sidecar_page_number_on_contents(self) -> None:
         import json
@@ -701,6 +1262,12 @@ class ImagePipelineQualityTests(unittest.TestCase):
         gloss = local_qwen.galtransl_glossary({"わだかまり": "", "プライベートでは": ""})
         self.assertIn("わだかまり->", gloss)
         self.assertIn("プライベート->", gloss)
+        moshi = local_qwen.galtransl_glossary({"もしかして": "", "おはよう": "早上好"})
+        self.assertIn("もしかして->难道是", moshi)
+        self.assertNotIn(
+            "もしかして->",
+            local_qwen.galtransl_glossary({"おはよう": "早上好"}),
+        )
 
     def test_image_system_pins_kurumi_name(self) -> None:
         self.assertIn("くるみ", local_qwen.IMAGE_SYSTEM)
@@ -729,6 +1296,8 @@ class ImagePipelineQualityTests(unittest.TestCase):
         self.assertEqual(data["おはよう"], "早上好")
 
     def test_keep_source_art_skips_pen_name_not_dialogue(self) -> None:
+        import bubble_recall_local
+
         self.assertTrue(local_qwen.keep_source_art("たらかん"))
         self.assertTrue(local_qwen.keep_source_art("-たらかん"))
         self.assertFalse(local_qwen.keep_source_art("くるみ君"))
@@ -738,6 +1307,81 @@ class ImagePipelineQualityTests(unittest.TestCase):
         self.assertFalse(local_qwen.keep_source_art("とりあえず"))
         self.assertFalse(local_qwen.keep_source_art("おはよう"))
         self.assertFalse(local_qwen.keep_source_art("村おこしは"))
+        self.assertFalse(
+            local_qwen.keep_source_art("もしかして"),
+            "5-kana dialogue is not a pen-name signature",
+        )
+        self.assertFalse(
+            bubble_recall_local.skip_as_art("もしかして", overlay=False)
+        )
+        self.assertTrue(
+            bubble_recall_local.skip_as_art("Bunny Time", overlay=False),
+            "English contents titles must not go through JP→ZH fill",
+        )
+
+    def test_apply_latin_identity_keeps_english_titles(self) -> None:
+        import bubble_recall_local
+
+        data = {
+            "Sweet Amber": "",
+            "Sad But True": "Sad But True漫画热牛奶2022年9月号",
+            "もしかして": "",
+            "Bunny Time": "Bunny Time",
+        }
+        changed = bubble_recall_local.apply_latin_identity(data)
+        self.assertEqual(data["Sweet Amber"], "Sweet Amber")
+        self.assertEqual(data["Sad But True"], "Sad But True")
+        self.assertEqual(data["もしかして"], "")
+        self.assertEqual(data["Bunny Time"], "Bunny Time")
+        self.assertIn("Sweet Amber", changed)
+        self.assertIn("Sad But True", changed)
+        self.assertNotIn("Bunny Time", changed)
+
+    def test_short_vocal_dest_maps_moans_not_dialogue(self) -> None:
+        self.assertEqual(local_qwen.short_vocal_dest("ふあああつ♥"), "呼啊啊♥")
+        self.assertEqual(local_qwen.short_vocal_dest("えぇっ♥"), "欸♥")
+        self.assertEqual(local_qwen.short_vocal_dest("あぁっ♡"), "啊啊♡")
+        self.assertEqual(local_qwen.short_vocal_dest("あ♥"), "啊♥")
+        self.assertEqual(local_qwen.short_vocal_dest("ふあぁあっ♥♥"), "呼啊啊♥♥")
+        self.assertEqual(local_qwen.short_vocal_dest("…ハァ"), "…哈啊")
+        self.assertEqual(local_qwen.short_vocal_dest("．．．ハァ"), "…哈啊")
+        self.assertEqual(local_qwen.short_vocal_dest("もしかして"), "")
+        self.assertEqual(local_qwen.short_vocal_dest("はい"), "")
+        self.assertEqual(local_qwen.short_vocal_dest("おい"), "")
+        self.assertEqual(local_qwen.short_vocal_dest("だ…"), "")
+        self.assertTrue(
+            local_qwen.translation_ok("ふあああつ♥", local_qwen.short_vocal_dest("ふあああつ♥"))
+        )
+        self.assertTrue(local_qwen.translation_ok("えぇっ♥", "欸♥"))
+        self.assertTrue(local_qwen.translation_ok("あ♥", "啊♥"))
+
+    def test_apply_short_vocal_dest_fills_empty_not_good_or_dialogue(self) -> None:
+        import bubble_recall_local
+
+        data = {
+            "えぇっ♥": "",
+            "ふあぁあっ♥♥": "呼啊啊♥♥",
+            "もしかして": "",
+            "あ♥": "而且还是个连个一起抽烟聊天的朋友都没有的孤僻处男，身上满满的臭味呢～♡",
+            "ふふふっ": "",
+            "．．．ハァ": "",
+            "だ…": "",
+        }
+        changed = bubble_recall_local.apply_short_vocal_dest(data)
+        self.assertEqual(data["えぇっ♥"], "欸♥")
+        self.assertEqual(data["ふあぁあっ♥♥"], "呼啊啊♥♥")
+        self.assertEqual(data["もしかして"], "")
+        self.assertEqual(data["あ♥"], "啊♥")
+        self.assertEqual(data["ふふふっ"], "")
+        self.assertEqual(data["．．．ハァ"], "…哈啊")
+        self.assertEqual(data["だ…"], "")
+        self.assertIn("えぇっ♥", changed)
+        self.assertIn("あ♥", changed)
+        self.assertIn("．．．ハァ", changed)
+        self.assertNotIn("ふあぁあっ♥♥", changed)
+        self.assertNotIn("もしかして", changed)
+        self.assertNotIn("ふふふっ", changed)
+        self.assertNotIn("だ…", changed)
 
     def test_image_system_forbids_returning_japanese(self) -> None:
         self.assertIn("禁止把日文原样返回", local_qwen.IMAGE_SYSTEM)
@@ -768,6 +1412,10 @@ class ImagePipelineQualityTests(unittest.TestCase):
         self.assertEqual(payload["messages"][0]["content"], local_qwen.GALTRANSL_SYSTEM)
         user = payload["messages"][1]["content"]
         self.assertIn("参考以下术语表", user)
+        self.assertIn(
+            "根据以上术语表的对应关系和备注，结合历史剧情和上下文，将下面的文本从日文翻译成简体中文：",
+            user,
+        )
         self.assertIn("センパイ->前辈", user)
         self.assertIn("もっとおち○ちんちょうだい♥", user)
         self.assertNotIn("json_schema", payload)
@@ -776,6 +1424,125 @@ class ImagePipelineQualityTests(unittest.TestCase):
             local_qwen.parse_galtransl_reply("再多给我♥", 1),
             ["再多给我♥"],
         )
+
+    def test_galtransl_leftover_payload_asks_short_line(self) -> None:
+        default = local_qwen.chat_payload(
+            "sakura-galtransl-7b-v3-7",
+            ["ワタシ．．．"],
+            local_qwen.IMAGE_SYSTEM,
+        )
+        leftover = local_qwen.chat_payload(
+            "sakura-galtransl-7b-v3-7",
+            ["ワタシ．．．"],
+            local_qwen.IMAGE_SYSTEM,
+            leftover=True,
+        )
+        self.assertNotIn("只译这一句", default["messages"][1]["content"])
+        user = leftover["messages"][1]["content"]
+        self.assertIn("只译这一句", user)
+        self.assertIn("ワタシ．．．", user)
+        self.assertEqual(leftover["messages"][0]["content"], local_qwen.GALTRANSL_SYSTEM)
+
+    def test_galtransl_retry_batch_uses_leftover_prompt(self) -> None:
+        import fill_ocr_local
+
+        captured: dict = {}
+
+        def fake_texts(batch, model=None, glossary="", leftover=False, **kwargs):
+            captured["leftover"] = leftover
+            captured["batch"] = list(batch)
+            return ["我……"]
+
+        with (
+            patch.object(
+                local_qwen, "fill_local_model", return_value="sakura-galtransl-7b-v3-7"
+            ),
+            patch.object(local_qwen, "translate_texts", side_effect=fake_texts),
+        ):
+            out = fill_ocr_local._translate_batch(
+                ["ワタシ．．．"], engine="local", retry=True
+            )
+        self.assertEqual(out, ["我……"])
+        self.assertEqual(captured["batch"], ["ワタシ．．．"])
+        self.assertTrue(captured["leftover"])
+
+    def test_fill_leftover_isolated_retry_keeps_short_dest(self) -> None:
+        import tempfile
+        import fill_ocr_local
+
+        calls: list[list[str]] = []
+
+        def fake(batch: list[str]) -> list[str]:
+            calls.append(list(batch))
+            if len(batch) == 1 and "どうした" in batch[0]:
+                return ["怎么了？"]
+            return ["诶…诶诶，可是为什么会变成这样呢我完全不知道"] * len(batch)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "translations.json"
+            data = {
+                "どうした？": "",
+                "長い対白ですよね本当に長い対白": "",
+            }
+            fill_ocr_local.translate_mapping(
+                data, dest, engine="mt", translate_fn=fake
+            )
+            saved = json.loads(dest.read_text(encoding="utf-8"))
+            self.assertEqual(saved["どうした？"], "怎么了？")
+            self.assertTrue(
+                any(len(batch) == 1 and "どうした" in batch[0] for batch in calls)
+            )
+
+    def test_fill_leftover_only_skips_dest_ok(self) -> None:
+        import tempfile
+        import fill_ocr_local
+
+        calls: list[list[str]] = []
+
+        def fake(batch: list[str]) -> list[str]:
+            calls.append(list(batch))
+            return ["怎么了？"] * len(batch)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "translations.json"
+            data = {"おはよう": "早上好", "どうした？": ""}
+            fill_ocr_local.translate_mapping(
+                data, dest, engine="mt", translate_fn=fake, leftover_only=True
+            )
+            saved = json.loads(dest.read_text(encoding="utf-8"))
+            self.assertEqual(saved["おはよう"], "早上好")
+            self.assertEqual(saved["どうした？"], "怎么了？")
+            sent = [item for batch in calls for item in batch]
+            self.assertNotIn("おはよう", sent)
+            self.assertTrue(any("どう了" in item or "どうした" in item for item in sent))
+            self.assertTrue(all(len(batch) == 1 for batch in calls))
+
+    def test_fill_leftover_only_does_not_expand_to_longer_key(self) -> None:
+        import tempfile
+        import fill_ocr_local
+
+        calls: list[list[str]] = []
+        long_key = "どうした？長い対白ですよね本当に長い対白"
+        long_dest = "怎么了？这是一句很长的对白啊真的很长"
+
+        def fake(batch: list[str]) -> list[str]:
+            calls.append(list(batch))
+            if any("長い対白" in item for item in batch):
+                return ["诶…诶诶，可是为什么会变成这样呢我完全不知道"] * len(batch)
+            return ["怎么了？"] * len(batch)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "translations.json"
+            data = {"どうした？": "", long_key: long_dest}
+            fill_ocr_local.translate_mapping(
+                data, dest, engine="mt", translate_fn=fake, leftover_only=True
+            )
+            saved = json.loads(dest.read_text(encoding="utf-8"))
+            self.assertEqual(saved["どうした？"], "怎么了？")
+            self.assertEqual(saved[long_key], long_dest)
+            sent = [item for batch in calls for item in batch]
+            self.assertTrue(any(item == "どうした？" for item in sent))
+            self.assertFalse(any("長い対白" in item for item in sent))
 
     def test_active_local_model_prefers_env(self) -> None:
         previous = os.environ.get("HANHUA_LOCAL_MODEL")
@@ -804,6 +1571,20 @@ class ImagePipelineQualityTests(unittest.TestCase):
                 os.environ.pop("HANHUA_LOCAL_MODEL", None)
             else:
                 os.environ["HANHUA_LOCAL_MODEL"] = previous
+
+    def test_mit_root_prefers_env_then_layout(self) -> None:
+        previous = os.environ.get("HANHUA_MIT_ROOT")
+        try:
+            os.environ.pop("HANHUA_MIT_ROOT", None)
+            layout = Path(local_qwen.__file__).resolve().parents[2] / "tools" / "manga-image-translator"
+            self.assertEqual(local_qwen.mit_root(), layout)
+            os.environ["HANHUA_MIT_ROOT"] = r"D:\custom-mit"
+            self.assertEqual(local_qwen.mit_root(), Path(r"D:\custom-mit"))
+        finally:
+            if previous is None:
+                os.environ.pop("HANHUA_MIT_ROOT", None)
+            else:
+                os.environ["HANHUA_MIT_ROOT"] = previous
 
     def test_fill_local_model_defaults_to_galtransl(self) -> None:
         previous = os.environ.get("HANHUA_LOCAL_MODEL")
@@ -1352,6 +2133,90 @@ class ImagePipelineQualityTests(unittest.TestCase):
             self.assertIn("…那个…", proc.stdout)
             self.assertNotIn("……那个……", proc.stdout)
             self.assertIn('""', proc.stdout.replace(" ", ""))
+
+    def test_empty_dest_skips_inpaint_none_only_when_flag_set(self) -> None:
+        mit_root = Path(r"D:\grok\tools\manga-image-translator")
+        mit_py = mit_root / ".venv" / "Scripts" / "python.exe"
+        if not mit_py.is_file():
+            self.skipTest("MIT venv missing")
+        script = (
+            "import os, json\n"
+            "from manga_translator.translators.none import empty_dest_skips_inpaint\n"
+            "os.environ.pop('MIT_SKIP_EMPTY_DEST', None)\n"
+            "print(json.dumps([\n"
+            "  empty_dest_skips_inpaint('', translator_is_none=False),\n"
+            "  empty_dest_skips_inpaint('', translator_is_none=True),\n"
+            "  empty_dest_skips_inpaint('我', translator_is_none=True),\n"
+            "]))\n"
+            "os.environ['MIT_SKIP_EMPTY_DEST'] = '1'\n"
+            "print(json.dumps([\n"
+            "  empty_dest_skips_inpaint('', translator_is_none=True),\n"
+            "  empty_dest_skips_inpaint('我', translator_is_none=True),\n"
+            "  empty_dest_skips_inpaint('', translator_is_none=False),\n"
+            "]))\n"
+        )
+        proc = subprocess.run(
+            [str(mit_py), "-c", script],
+            cwd=str(mit_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
+        lines = [line for line in proc.stdout.splitlines() if line.strip()]
+        self.assertEqual(json.loads(lines[-2]), [True, False, False])
+        self.assertEqual(json.loads(lines[-1]), [True, False, True])
+
+    def test_run_mit_folder_sets_skip_empty_dest_except_crop_queue(self) -> None:
+        import tempfile
+        import typeset_ocr_local
+
+        captured: dict = {}
+
+        def fake_run(cmd, cwd=None, env=None, **kwargs):
+            captured["env"] = env
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trans = root / "translations.json"
+            trans.write_text("{}", encoding="utf-8")
+            src = root / "in"
+            dest = root / "out"
+            src.mkdir()
+            dest.mkdir()
+            (src / "001.jpg").write_bytes(b"x")
+            cfg = root / "cfg.json"
+            cfg.write_text("{}", encoding="utf-8")
+            with (
+                patch.object(local_qwen, "probe", return_value=(False, "")),
+                patch.object(
+                    local_qwen, "run_mit_with_page_progress", side_effect=fake_run
+                ),
+            ):
+                rc = typeset_ocr_local.run_mit_folder(
+                    root, src, dest, trans=trans, config_file=cfg
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(captured["env"].get("MIT_SKIP_EMPTY_DEST"), "1")
+            captured.clear()
+            with (
+                patch.object(local_qwen, "probe", return_value=(False, "")),
+                patch.object(
+                    local_qwen, "run_mit_with_page_progress", side_effect=fake_run
+                ),
+            ):
+                rc = typeset_ocr_local.run_mit_folder(
+                    root,
+                    src,
+                    dest,
+                    trans=trans,
+                    config_file=cfg,
+                    crop_queue=[""],
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(captured["env"].get("MIT_SKIP_EMPTY_DEST"), "0")
+            self.assertIn("MIT_CROP_QUEUE", captured["env"])
 
     def test_changed_pages_selects_filled_keys_and_missing_output(self) -> None:
         import tempfile

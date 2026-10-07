@@ -373,7 +373,7 @@ def skip_as_art(
     if overlay and local_qwen.suspicious_ocr(ocr_text):
         return True
     core_n = len(_core(ocr_text))
-    if overlay and local_qwen._latin_or_digit(ocr_text) and core_n <= 20:
+    if local_qwen._latin_or_digit(ocr_text) and core_n <= 20:
         return True
     if overlay and box and len(box) >= 4:
         w = max(0, int(box[2]) - int(box[0]))
@@ -408,6 +408,37 @@ def skip_as_art(
         return True
     letters = re.sub(r"[♥♡❤❥]", "", _core(compact))
     return bool(_REPEAT_KANA_SFX_RE.match(letters))
+
+
+def apply_short_vocal_dest(data: dict[str, str]) -> list[str]:
+    """Empty/rejected short moans get phonetic Chinese so MIT paints instead of blanking."""
+    changed: list[str] = []
+    for key, dst in list(data.items()):
+        if key in SKIP or skip_as_art(key, overlay=False):
+            continue
+        if local_qwen.translation_ok(key, dst):
+            continue
+        dest = local_qwen.short_vocal_dest(key)
+        if not dest or not local_qwen.translation_ok(key, dest):
+            continue
+        data[key] = dest
+        changed.append(key)
+    return changed
+
+
+def apply_latin_identity(data: dict[str, str]) -> list[str]:
+    """English titles stay identity so MIT re-renders them instead of erasing."""
+    changed: list[str] = []
+    for key, dst in list(data.items()):
+        if key in SKIP or not local_qwen._latin_or_digit(key):
+            continue
+        if not skip_as_art(key, overlay=False):
+            continue
+        if local_qwen.translation_ok(key, dst):
+            continue
+        data[key] = key
+        changed.append(key)
+    return changed
 
 
 def already_typeset(

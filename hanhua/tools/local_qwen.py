@@ -35,16 +35,39 @@ LOCAL_HEALTH = f"http://{LOCAL_HOST}:{LOCAL_PORT}/health"
 LOCAL_MODEL = "qwen3.5:9b-uncensored-local"
 HANHUA_FILL_MODEL = "sakura-galtransl-7b-v3-7"
 LOCAL_KEY = "local"
-CHUNK = 8
+# Sakura-GalTransl-7B-v3.7 card asks for 7-10 sentences per request.
+# GalTransl's generic gpt.numPerRequestTranslate cap is 16 (range 1-32).
+FILL_CHUNK_DEFAULT = 8
+FILL_CHUNK_MIN = 1
+FILL_CHUNK_MAX = 32
+CHUNK = FILL_CHUNK_DEFAULT
 TIMEOUT = 300
 PROGRESS_JSONL = False
-DEFAULT_MIT_ROOT = r"D:\grok\tools\manga-image-translator"
+
+
+def default_mit_root() -> Path:
+    # tools/local_qwen.py → 内嵌汉化 → workspace/tools/manga-image-translator
+    return Path(__file__).resolve().parents[2] / "tools" / "manga-image-translator"
+
+
+DEFAULT_MIT_ROOT = str(default_mit_root())
 
 
 def take_flag(argv: list[str], flag: str) -> tuple[list[str], bool]:
     if flag in argv:
         return [a for a in argv if a != flag], True
     return argv, False
+
+
+def fill_chunk() -> int:
+    raw = str(os.environ.get("HANHUA_FILL_CHUNK") or "").strip()
+    if not raw:
+        return FILL_CHUNK_DEFAULT
+    try:
+        n = int(raw)
+    except ValueError:
+        return FILL_CHUNK_DEFAULT
+    return max(FILL_CHUNK_MIN, min(FILL_CHUNK_MAX, n))
 
 
 def enable_progress(enabled: bool) -> None:
@@ -75,7 +98,7 @@ def emit(kind: str, phase: str, **kwargs: Any) -> None:
 
 def mit_root() -> Path:
     env = str(os.environ.get("HANHUA_MIT_ROOT") or "").strip()
-    return Path(env) if env else Path(DEFAULT_MIT_ROOT)
+    return Path(env) if env else default_mit_root()
 
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -104,6 +127,49 @@ _HAA_OCR_RE = re.compile(r"^[４4][０0][：:…．.]*[♥♡]?$")
 _KANA_COLON_RE = re.compile(r"(?<=[\u3040-\u30ff])[：:](?=[\u3040-\u30ff])")
 _REPEAT_RE = re.compile(r"(.)\1{5,}")
 _SKIP_KEYS = {"", "trans", "text"}
+_TITLE_SPLIT_RE = re.compile(r"(?<=〉)(?=[0-9０-９]+[PpＰｐ])")
+_MOAN_YEN_RE = re.compile(r"([♡♥…]+)[0-9０-９]{2,}\s*万?円([♡♥]*)")
+_COPYRIGHT_YEN_RE = re.compile(r"罰金|懲役|著作|配信")
+_ESSAY_OCR_RE = re.compile(r"東京を開いて|学年ぜ|ビジャントライ")
+_PLACEHOLDER_RE = re.compile(r"○+")
+_KURUMI_WRONG_RE = re.compile(
+    r"小久留美|久留美|小久美|九琉璃|九琉瑞|九琉|来海|来实|小玖瑠|玖瑠"
+)
+_PEN_NAME_RE = re.compile(r"^[ぁ-ん]{4}$")
+_COMMON_HIRA_WORDS = {
+    "だから",
+    "しかし",
+    "そして",
+    "あなた",
+    "わたし",
+    "みんな",
+    "ごめん",
+    "お願い",
+    "ちょっと",
+    "すごい",
+    "わかる",
+    "できる",
+    "なんで",
+    "どうして",
+    "いつも",
+    "ほんと",
+    "まさか",
+    "よろしく",
+    "おはよう",
+    "こんにちは",
+    "こんばんは",
+    "ありがとう",
+    "すみません",
+    "これから",
+    "それで",
+    "でもね",
+    "かしら",
+    "だろう",
+    "ください",
+    "なさい",
+    "とりあえず",
+    "あとがき",
+}
 
 
 def list_image_files(folder: Path) -> list[Path]:
@@ -233,6 +299,11 @@ def repair_ocr_bang(text: str) -> str:
         out = re.sub(r"…{2,}", "…", out)
         out = out.replace("!?", "！？")
         out = out.replace("?!", "？！")
+    out = out.replace("パナナ", "バナナ")
+    out = out.replace("のだめに", "のために")
+    out = out.replace("ネタト", "ネット")
+    if not _COPYRIGHT_YEN_RE.search(out):
+        out = _MOAN_YEN_RE.sub(lambda m: m.group(1) + (m.group(2) or ""), out)
     return out
 
 
@@ -273,10 +344,95 @@ def _latin_or_digit(text: str) -> bool:
 
 
 def _short_sfx(text: str) -> bool:
+    if is_short_vocal(text):
+        return False
     if _HIRA_RE.search(text or "") or _HAN_RE.search(text or ""):
         return False
     core = "".join(_KATA_RE.findall(text or ""))
     return 1 <= len(core) <= 3
+
+
+_KATA_HIRA = str.maketrans(
+    "ァアィイゥウェエォオカキクケコサシスセソタチツテトナニヌネノ"
+    "ハヒフヘホマミムメモヤユヨラリルレロワヲンッー",
+    "ぁあぃいぅうぇえぉおかきくけこさしすせそたちつてとなにぬねの"
+    "はひふへほまみむめもやゆよらりるれろわをんっー",
+)
+_VOCAL_CHAR_RE = re.compile(
+    r"[ぁあぃいぅうぇえぉおんっッふはひへほー〜～つ♥♡❤！!？?…。．.\s]"
+)
+_NOT_VOCAL_WORD = frozenset(
+    {"はい", "ええ", "おい", "いい", "うん", "ほら", "は", "お", "え"}
+)
+_VOCAL_MAP = {
+    "あ": "啊",
+    "ぁ": "啊",
+    "い": "咿",
+    "ぃ": "咿",
+    "う": "呜",
+    "ぅ": "呜",
+    "え": "欸",
+    "ぇ": "欸",
+    "お": "哦",
+    "ぉ": "哦",
+    "ん": "嗯",
+    "は": "哈",
+    "ひ": "嘻",
+    "へ": "嘿",
+    "ほ": "吼",
+    "ふ": "呼",
+}
+
+
+def _vocal_compact(src: str) -> str:
+    compact = "".join(str(src or "").split()).translate(_KATA_HIRA)
+    return re.sub(r"[．.]{2,}", "…", compact)
+
+
+def is_short_vocal(src: str) -> bool:
+    compact = _vocal_compact(src)
+    if not compact or any(not _VOCAL_CHAR_RE.fullmatch(ch) for ch in compact):
+        return False
+    core = re.sub(r"[っッつ！!？?…。．.ー〜～]", "", _ocr_core(compact))
+    if core in _NOT_VOCAL_WORD or not (1 <= len(core) <= 8):
+        return False
+    return bool(re.search(r"[♥♡❤っッー]", compact) or len(set(core)) <= 2)
+
+
+def short_vocal_dest(src: str) -> str:
+    """Phonetic Chinese for short moans. Empty when src is dialogue, not a vocal."""
+    if not is_short_vocal(src):
+        return ""
+    chars = list(_vocal_compact(src))
+    out: list[str] = []
+    i = 0
+    while i < len(chars):
+        ch = chars[i]
+        if ch == "ふ":
+            n = 1
+            while i + n < len(chars) and chars[i + n] == "ふ":
+                n += 1
+            out.append(("呵" if n >= 2 else "呼") * n)
+            i += n
+            continue
+        if ch in {"っ", "ッ", "つ"}:
+            nxt = chars[i + 1] if i + 1 < len(chars) else ""
+            if nxt in {"♥", "♡", "❤", "！", "!", "？", "?", "…", ""}:
+                i += 1
+                continue
+            out.append("っ")
+            i += 1
+            continue
+        mapped = _VOCAL_MAP.get(ch)
+        if mapped:
+            out.append(mapped)
+        elif ch in {"♥", "♡", "❤", "！", "!", "？", "?", "…", "。", "．", ".", "ー", "〜", "～"}:
+            out.append(ch)
+        i += 1
+    text = "".join(out)
+    text = re.sub(r"啊{3,}", "啊啊", text)
+    text = re.sub(r"欸{2,}", "欸", text)
+    return text
 
 
 def _cjk_name_or_sign(text: str) -> bool:
@@ -288,8 +444,52 @@ def _cjk_name_or_sign(text: str) -> bool:
     return 2 <= len(han) <= 4
 
 
+def keep_source_art(text: str) -> bool:
+    """Hiragana-only pen names like たらかん. Short dialogue (あとで / だから) must not match."""
+    compact = re.sub(r"^[-－—~〜～©]+|[-－—~〜～]+$", "", "".join((text or "").split()))
+    if not _PEN_NAME_RE.fullmatch(compact):
+        return False
+    return compact not in _COMMON_HIRA_WORDS
+
+
+def repair_locked_names(src: str, dst: str) -> str:
+    """Keep くるみ as 胡桃 when GalTransl invents 来海 / 九琉璃 / 久留美."""
+    value = "" if dst is None else str(dst)
+    if "くるみ" in str(src or ""):
+        value = _KURUMI_WRONG_RE.sub("胡桃", value)
+    return value
+
+
+def apply_locked_names(data: dict[str, str]) -> list[str]:
+    changed: list[str] = []
+    for key, val in list(data.items()):
+        if key in _SKIP_KEYS:
+            continue
+        fixed = repair_locked_names(key, "" if val is None else str(val))
+        if fixed != val:
+            data[key] = fixed
+            changed.append(key)
+    return changed
+
+
+_JP_TAIL_RE = re.compile(
+    r"(?:です|ます|でした|ました|だったのかよ|だった|なのかよ|のかよ|んだよ)[！!？?♡♥…。．.]*$"
+)
+
+
+def scrub_translation(dst: str) -> str:
+    """Drop trailing JP copulas GalTransl leaves on otherwise-Chinese lines."""
+    value = str(dst or "")
+    for _ in range(4):
+        nxt = _JP_TAIL_RE.sub("", value)
+        if nxt == value:
+            break
+        value = nxt
+    return value
+
+
 def leftover_japanese(dst: str) -> bool:
-    text = dst or ""
+    text = scrub_translation(dst)
     hira = _HIRA_KEEP_RE.sub("", text)
     if _HIRA_RE.search(hira):
         return True
@@ -309,6 +509,120 @@ def skip_rewrite(src: str) -> bool:
     return _short_sfx(source) or _latin_or_digit(source) or _cjk_name_or_sign(source)
 
 
+_JP_SIMP = str.maketrans(
+    {
+        "時": "时",
+        "済": "济",
+        "齊": "齐",
+        "話": "话",
+        "語": "语",
+        "後": "后",
+        "來": "来",
+        "気": "气",
+        "氣": "气",
+        "発": "发",
+        "對": "对",
+        "対": "对",
+        "経": "经",
+        "經": "经",
+        "験": "验",
+        "關": "关",
+        "関": "关",
+        "係": "系",
+        "実": "实",
+        "從": "从",
+        "従": "从",
+        "長": "长",
+        "門": "门",
+        "間": "间",
+        "開": "开",
+        "東": "东",
+        "樂": "乐",
+        "楽": "乐",
+        "學": "学",
+        "國": "国",
+        "會": "会",
+        "終": "终",
+        "無": "无",
+        "爲": "为",
+        "為": "为",
+        "裡": "里",
+        "裏": "里",
+        "兒": "儿",
+        "児": "儿",
+        "樣": "样",
+        "様": "样",
+        "點": "点",
+        "電": "电",
+        "雲": "云",
+        "風": "风",
+        "讀": "读",
+        "売": "卖",
+        "買": "买",
+        "場": "场",
+        "図": "图",
+        "書": "书",
+        "見": "见",
+        "現": "现",
+        "熱": "热",
+        "車": "车",
+        "転": "转",
+        "伝": "传",
+    }
+)
+
+
+_PARTICLE_RE = re.compile(r"[はをがにでともの]")
+_NAME_KANA_RE = re.compile(r"[\u4e00-\u9fff]{2,}[\u3041-\u3096]{3,}")
+
+
+def is_kanji_transliteration(src: str, dst: str) -> bool:
+    """True when dst is mostly simplified-kanji copy of OCR, e.g. 推済時→推济时."""
+    source = str(src or "")
+    value = str(dst or "")
+    if (
+        _cjk_name_or_sign(source)
+        or _NAME_KANA_RE.search(source)
+        or _KATA_RE.search(source)
+        or len(_HIRA_RE.findall(source)) >= 3
+        or re.search(r"[0-9０-９]{4}\s*年", source)
+    ):
+        return False
+    src_han = "".join(_HAN_RE.findall(source)).translate(_JP_SIMP)
+    dst_han = "".join(_HAN_RE.findall(value))
+    if len(src_han) < 3 or not dst_han:
+        return False
+    copied = 0
+    for n in range(min(8, len(src_han)), 2, -1):
+        run = src_han[:n]
+        if dst_han.startswith(run) or run in dst_han[: n + 2]:
+            copied = n
+            break
+    if copied < 3:
+        return False
+    compact = "".join(source.split())
+    if len(compact) > 16 or _PARTICLE_RE.search(compact):
+        extra = max(0, len(dst_han) - copied)
+        return extra <= 2
+    return True
+
+
+def dest_too_long_for_source(src: str, dst: str) -> bool:
+    """True when GalTransl bound a short OCR key to an unrelated long line."""
+    source = _ocr_core(src)
+    value = "".join(str(dst or "").split())
+    src_n = len(source)
+    dst_han = len(_HAN_RE.findall(str(dst or "")))
+    if src_n <= 3 and dst_han >= 8:
+        return True
+    if src_n <= 6 and dst_han >= 10:
+        return True
+    raw = "".join(str(src or "").split())
+    if _latin_or_digit(src) and _HAN_RE.search(str(dst or "")) and len(value) > len(raw) + 2:
+        return True
+    return False
+
+
 def translation_ok(src: str, dst: str) -> bool:
     value = "" if dst is None else str(dst)
     if not value.strip():
@@ -318,11 +632,89 @@ def translation_ok(src: str, dst: str) -> bool:
         return False
     if is_repetition_hallucination(value, source):
         return False
+    cleaned_src = repair_ocr_bang(source)
+    if re.search(r"[0-9０-９]+万?円", value) and not re.search(
+        r"[0-9０-９]+万?円", cleaned_src
+    ):
+        return False
     if value == source or value.strip() == source.strip():
         if has_ocr_digit_artifact(source):
             return False
         return _short_sfx(source) or _latin_or_digit(source) or _cjk_name_or_sign(source)
+    if is_kanji_transliteration(cleaned_src, value):
+        return False
+    if dest_too_long_for_source(cleaned_src, value):
+        return False
     return not leftover_japanese(value)
+
+
+def split_merged_titles(text: str) -> list[str]:
+    src = str(text or "").strip()
+    if not src:
+        return []
+    parts = [p for p in _TITLE_SPLIT_RE.split(src) if p]
+    if len(parts) >= 2:
+        return parts
+    return [src]
+
+
+def suspicious_ocr(text: str) -> bool:
+    src = str(text or "")
+    compact = "".join(src.split())
+    if _ESSAY_OCR_RE.search(compact):
+        return True
+    if _MOAN_YEN_RE.search(src) and not _COPYRIGHT_YEN_RE.search(src):
+        return True
+    if re.search(r"[12１２][0-9０-９]{3}\s*年", src) and not _COPYRIGHT_YEN_RE.search(
+        src
+    ):
+        return True
+    return False
+
+
+def _ocr_core(text: str) -> str:
+    return re.sub(r"[○\s♥♡❤]", "", repair_ocr_bang(text))
+
+
+def _placeholder_match(pattern: str, value: str) -> bool:
+    raw = repair_ocr_bang(pattern)
+    if "○" not in raw:
+        return False
+    escaped = re.escape(raw)
+    wildcard = _PLACEHOLDER_RE.sub(r".+", escaped)
+    return bool(re.fullmatch(wildcard, repair_ocr_bang(value)))
+
+
+def preferred_ocr_key(data: dict[str, str], key: str) -> str:
+    if not data or key in _SKIP_KEYS:
+        return key
+    core = _ocr_core(key)
+    best = key
+    best_len = len(core)
+    for other in data:
+        if other in _SKIP_KEYS or other == key:
+            continue
+        other_core = _ocr_core(other)
+        if core and other_core.startswith(core) and len(other_core) > best_len:
+            best, best_len = other, len(other_core)
+            continue
+        if "○" in key and "○" not in other and _placeholder_match(key, other):
+            if len(other_core) > best_len:
+                best, best_len = other, len(other_core)
+    return best
+
+
+def prepare_ocr_mapping(data: dict[str, str]) -> dict[str, str]:
+    normalize_mapping(data)
+    for key in list(data):
+        if key in _SKIP_KEYS:
+            continue
+        for part in split_merged_titles(key):
+            data.setdefault(part, "")
+        cleaned = repair_ocr_bang(key)
+        if cleaned != key:
+            data.setdefault(cleaned, data.get(key, ""))
+    return data
 
 
 def normalize_mapping(data: dict[str, str]) -> list[str]:
@@ -397,7 +789,13 @@ def mapped_translation(mapping: dict[str, str], query: str) -> str:
 def store_translation(data: dict[str, str], raw: str, dst: str) -> None:
     value = repair_ocr_bang("" if dst is None else str(dst))
     cleaned = repair_ocr_bang(raw)
+    value = repair_locked_names(raw, value)
+    value = scrub_translation(value)
     accepted = value if translation_ok(raw, value) or translation_ok(cleaned, value) else ""
+    if not accepted:
+        prev = str(data.get(raw) or data.get(cleaned) or "")
+        if _HAN_RE.search(prev) and not leftover_japanese(prev):
+            accepted = prev
     data[raw] = accepted
     data[cleaned] = accepted
     for key in list(data):
@@ -510,6 +908,10 @@ IMAGE_SYSTEM = (
     "禁止把日文原样返回。对白、招牌、说明必须译成简体中文。"
     "禁止在译文里留平假名。片假名单词要译成中文，仅两三个字的拟声词可留片假名。"
     "数字1紧挨感叹号是OCR把！认成1，必须写成！不要抄1；句尾12多半是！？。"
+    "夢って／私の夢是「梦想」，不是「梦里」；只有夢の中／夢で才是做梦。"
+    "くるみ是人名胡桃，禁止译成来海、九琉璃、久留美。"
+    "わだかまり是心里的芥蒂／心结，不是身体部位。"
+    "禁止把OCR乱码的汉字硬译成中文词。"
     "译名前后保持一致。占位符 @@RPGn@@ 必须原样保留。"
     "不要解释，不要注音。"
 )
@@ -544,12 +946,21 @@ def is_galtransl_model(model: str) -> bool:
     return "galtransl" in name or "sakura" in name
 
 
-def galtransl_user_content(texts: list[str], glossary: str = "") -> str:
+def galtransl_user_content(
+    texts: list[str], glossary: str = "", *, leftover: bool = False
+) -> str:
     gloss = str(glossary or "").strip() or "（空）"
+    lead = (
+        "根据以上术语表的对应关系和备注，将下面的文本从日文翻译成简体中文。"
+        "这是一句短对白，只译这一句，不要扩写成段落或把邻句绑进来：\n"
+        if leftover
+        else "根据以上术语表的对应关系和备注，结合历史剧情和上下文，将下面的文本从日文翻译成简体中文：\n"
+    )
     return (
         "参考以下术语表（可为空，格式为src->dst #备注）：\n"
         + gloss
-        + "\n根据以上术语表的对应关系和备注，将下面的文本从日文翻译成简体中文：\n"
+        + "\n"
+        + lead
         + "\n".join(str(item) for item in texts)
     )
 
@@ -566,6 +977,23 @@ def galtransl_glossary(data: dict[str, str], limit: int = 24) -> str:
     if re.search(r"くん|君", blob) and not any(r.startswith("センパイ->") for r in rows):
         rows.insert(0, "先輩->学长 #男性前辈")
         rows.insert(0, "センパイ->学长 #男性前辈")
+    if not any(r.startswith("夢って->") for r in rows):
+        rows.insert(0, "私の夢->我的梦想")
+        rows.insert(0, "夢って->说起来梦想是 #不是梦里；夢の中/夢で才是做梦")
+    if re.search(r"くるみ", blob) and not any(r.startswith("くるみ->") for r in rows):
+        rows.insert(0, "くるみ->胡桃 #人名，不是来海/九琉璃/久留美")
+    if re.search(r"わだかまり", blob) and not any(
+        r.startswith("わだかまり->") for r in rows
+    ):
+        rows.insert(0, "わだかまり->心里的芥蒂 #心结，不是身体部位")
+    if re.search(r"プライベート", blob) and not any(
+        r.startswith("プライベート->") for r in rows
+    ):
+        rows.insert(0, "プライベート->私下 #プライベートでは是私底下")
+    if re.search(r"もしかして", blob) and not any(
+        r.startswith("もしかして->") for r in rows
+    ):
+        rows.insert(0, "もしかして->难道是 #短句，不是后面那句接吻长句")
     return "\n".join(rows)
 
 
@@ -646,13 +1074,19 @@ def chat_payload(
     temperature: float = 0.3,
     max_tokens: int = 2048,
     glossary: str = "",
+    leftover: bool = False,
 ) -> dict[str, Any]:
     if is_galtransl_model(model):
         return {
             "model": model,
             "messages": [
                 {"role": "system", "content": GALTRANSL_SYSTEM},
-                {"role": "user", "content": galtransl_user_content(texts, glossary)},
+                {
+                    "role": "user",
+                    "content": galtransl_user_content(
+                        texts, glossary, leftover=leftover
+                    ),
+                },
             ],
             "temperature": temperature,
             "top_p": 0.8,
@@ -847,9 +1281,12 @@ def translate_chat(
     *,
     timeout: int = TIMEOUT,
     glossary: str = "",
+    leftover: bool = False,
 ) -> list[str]:
     protected, helds = protect_batch(texts)
-    payload = chat_payload(model, protected, system, glossary=glossary)
+    payload = chat_payload(
+        model, protected, system, glossary=glossary, leftover=leftover
+    )
     data = post_chat(url, payload, key, timeout=timeout)
     raw = message_text(data)
     parsed = (
@@ -866,10 +1303,17 @@ def translate_texts(
     system: str = GAME_SYSTEM,
     model: str | None = None,
     glossary: str = "",
+    leftover: bool = False,
 ) -> list[str]:
     name = str(model or active_local_model() or LOCAL_MODEL).strip() or LOCAL_MODEL
     return translate_chat(
-        LOCAL_CHAT, LOCAL_KEY, name, texts, system, glossary=glossary
+        LOCAL_CHAT,
+        LOCAL_KEY,
+        name,
+        texts,
+        system,
+        glossary=glossary,
+        leftover=leftover,
     )
 
 

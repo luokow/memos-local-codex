@@ -46,7 +46,7 @@
     "colorizer": "none"
   },
   "inpainter": {
-    "inpainter": "lama_large",
+    "inpainter": "none",
     "inpainting_size": 2560,
     "inpainting_precision": "fp16"
   },

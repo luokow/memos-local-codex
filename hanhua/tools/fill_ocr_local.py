@@ -63,7 +63,7 @@ def _translate_batch(
         model = local_qwen.fill_local_model()
         if local_qwen.is_galtransl_model(model):
             return local_qwen.translate_texts(
-                batch, model=model, glossary=glossary
+                batch, model=model, glossary=glossary, leftover=retry
             )
         system = local_qwen.IMAGE_RETRY_SYSTEM if retry else local_qwen.IMAGE_SYSTEM
         if glossary:
@@ -104,6 +104,22 @@ def pending_keys(
     return pending
 
 
+def empty_dest_keys(
+    data: dict[str, str],
+    originals: list[str],
+    *,
+    line_sources: dict[str, str] | None = None,
+) -> list[str]:
+    """Empty or rejected dest only. Dest-ok newline retries stay on the first pass."""
+    return [
+        key
+        for key in pending_keys(
+            data, originals, rewrite=False, line_sources=line_sources
+        )
+        if not local_qwen.translation_ok(key, data.get(key, ""))
+    ]
+
+
 def _iter_batches(
     keys: list[str], chunk: int, line_sources: dict[str, str]
 ):
@@ -132,16 +148,23 @@ def translate_mapping(
     engine: str = "local",
     translate_fn=None,
     rewrite: bool = False,
+    leftover_only: bool = False,
 ) -> dict[str, str]:
     originals = [key for key in data if key not in SKIP]
     changed = local_qwen.normalize_mapping(data)
+    local_qwen.prepare_ocr_mapping(data)
+    latin = bubble_recall_local.apply_latin_identity(data)
+    vocals = bubble_recall_local.apply_short_vocal_dest(data)
     originals = [key for key in data if key not in SKIP]
     line_sources = cjk_wrap.load_line_sources(dest.parent)
-    keys = pending_keys(
-        data, originals, rewrite=rewrite, line_sources=line_sources
-    )
+    if leftover_only:
+        keys = empty_dest_keys(data, originals, line_sources=line_sources)
+    else:
+        keys = pending_keys(
+            data, originals, rewrite=rewrite, line_sources=line_sources
+        )
     filled: list[str] = []
-    for key in list(changed) + list(keys):
+    for key in list(changed) + list(latin) + list(vocals) + list(keys):
         if key not in filled:
             filled.append(key)
         cleaned = local_qwen.repair_ocr_bang(key)
@@ -172,7 +195,7 @@ def translate_mapping(
                     + detail
                     + "). Open Local AI first; do not start MiniMax H3."
                 )
-            chunk = local_qwen.CHUNK
+            chunk = local_qwen.fill_chunk()
             print(
                 f"translate {len(keys)}/{len(data)} {kind} engine=local model={model_name}"
             )
@@ -182,19 +205,30 @@ def translate_mapping(
 
         def translate_fn(batch: list[str]) -> list[str]:
             return _translate_batch(
-                batch, engine=engine, retry=False, glossary=glossary
+                batch,
+                engine=engine,
+                retry=leftover_only,
+                glossary=glossary,
             )
     else:
-        chunk = local_qwen.CHUNK
+        chunk = local_qwen.fill_chunk()
         print(f"translate {len(keys)}/{len(data)} {kind} engine={engine}")
 
     total = len(keys)
     sent = 0
     local_qwen.emit("phase", "fill", done=0, total=total, message=f"填字 {total}")
 
-    def run_batch(batch: list[str]) -> None:
+    def run_batch(batch: list[str], *, leftover: bool = False) -> None:
         nonlocal sent
-        queries = [cjk_wrap.fill_query(item, line_sources) for item in batch]
+        if leftover:
+            queries = [local_qwen.repair_ocr_bang(item) for item in batch]
+        else:
+            queries = [
+                cjk_wrap.fill_query(
+                    local_qwen.preferred_ocr_key(data, item), line_sources
+                )
+                for item in batch
+            ]
         last_exc: Exception | None = None
         out: list[str] | None = None
         for attempt in range(4):
@@ -218,9 +252,16 @@ def translate_mapping(
                     print(f"skip {type(one_exc).__name__}: {preview}")
                     out.append("")
         for src_text, dst_text, query in zip(batch, out, queries):
-            local_qwen.store_translation(
-                data, src_text, cjk_wrap.keep_or_force_breaks(query, dst_text)
+            body = (
+                dst_text
+                if leftover
+                else cjk_wrap.keep_or_force_breaks(query, dst_text)
             )
+            local_qwen.store_translation(data, src_text, body)
+            if not leftover:
+                preferred = local_qwen.preferred_ocr_key(data, src_text)
+                if preferred != src_text:
+                    local_qwen.store_translation(data, preferred, body)
         dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         sent += len(batch)
         if rewrite:
@@ -236,27 +277,31 @@ def translate_mapping(
             "progress", "fill", done=max(0, accepted), total=total, message=f"{accepted}/{total}"
         )
 
-    for batch in _iter_batches(keys, chunk, line_sources):
-        run_batch(batch)
+    if leftover_only:
+        for one in keys:
+            run_batch([one], leftover=True)
+    else:
+        for batch in _iter_batches(keys, chunk, line_sources):
+            run_batch(batch)
     if using_default:
         def translate_fn(batch: list[str]) -> list[str]:
             return _translate_batch(
                 batch, engine=engine, retry=True, glossary=glossary
             )
     for round_i in range(2):
-        leftover = pending_keys(
-            data, originals, rewrite=False, line_sources=line_sources
+        leftover = empty_dest_keys(
+            data, originals, line_sources=line_sources
         )
         if not leftover:
             break
         print(f"retry untranslated round {round_i + 2}: {len(leftover)}")
         for one in leftover:
-            run_batch([one])
+            run_batch([one], leftover=True)
 
     dest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     filled = sum(1 for key in originals if local_qwen.translation_ok(key, data.get(key, "")))
-    leftover = pending_keys(
-        data, originals, rewrite=False, line_sources=line_sources
+    leftover = empty_dest_keys(
+        data, originals, line_sources=line_sources
     )
     print(f"done filled={filled} leftover={len(leftover)} total={len(originals)} -> {dest}")
     local_qwen.emit(
@@ -279,6 +324,7 @@ def main() -> int:
     argv = list(sys.argv[1:])
     argv, jsonl = local_qwen.take_flag(argv, "--progress-jsonl")
     argv, rewrite = local_qwen.take_flag(argv, "--rewrite")
+    argv, leftover_only = local_qwen.take_flag(argv, "--leftover")
     local_qwen.enable_progress(jsonl)
     engine = "local"
     if "--mt" in argv:
@@ -289,16 +335,22 @@ def main() -> int:
         argv = [a for a in argv if a != "--local"]
     if len(argv) < 1:
         print(
-            "usage: fill_ocr_local.py [--mt] [--rewrite] [--progress-jsonl] "
+            "usage: fill_ocr_local.py [--mt] [--rewrite] [--leftover] [--progress-jsonl] "
             "<translations.json | work-folder>",
             file=sys.stderr,
         )
         return 2
     target = Path(argv[0])
     if target.is_dir():
-        rc = bubble_recall_local.launch_with_mit(target)
-        if rc not in (0, None):
-            print(f"bubble-recall exit {rc}", file=sys.stderr)
+        if leftover_only:
+            pass
+        elif bubble_recall_local.recall_cache_fresh(target):
+            added = bubble_recall_local.merge_cached_recall_keys(target)
+            print(f"bubble-recall skip: cache fresh added_keys={added}")
+        else:
+            rc = bubble_recall_local.launch_with_mit(target)
+            if rc not in (0, None):
+                print(f"bubble-recall exit {rc}", file=sys.stderr)
         data, dest = collect_from_dir(target)
     elif target.is_file():
         data = load_mapping(target)
@@ -306,7 +358,9 @@ def main() -> int:
     else:
         print(f"not found: {target}", file=sys.stderr)
         return 1
-    translate_mapping(data, dest, engine=engine, rewrite=rewrite)
+    translate_mapping(
+        data, dest, engine=engine, rewrite=rewrite, leftover_only=leftover_only
+    )
     return 0
 
 

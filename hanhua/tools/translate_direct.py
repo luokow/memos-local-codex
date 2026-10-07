@@ -1,6 +1,6 @@
 # Translate ManualTransFile.json.
 # Default: Aliyun qwen-mt-plus from MTool config (unchanged).
-# --local: Local AI fill model. Port is HANHUA_LOCAL_PORT, otherwise 18135. Never prints API keys.
+# --local: Local AI chat Qwen on 127.0.0.1:18135. Never prints API keys.
 from __future__ import annotations
 
 import json
@@ -29,7 +29,8 @@ def load_upstream() -> tuple[str, str, str]:
 
 
 def load_local() -> tuple[str, str, str]:
-    return local_qwen.LOCAL_CHAT, local_qwen.LOCAL_KEY, local_qwen.LOCAL_MODEL
+    env = str(os.environ.get("HANHUA_LOCAL_MODEL") or "").strip()
+    return local_qwen.LOCAL_CHAT, local_qwen.LOCAL_KEY, env or local_qwen.LOCAL_MODEL
 
 
 def resolve_engine(engine: str | None) -> str:
@@ -79,7 +80,7 @@ def translate_mapping(
     kind = resolve_engine(engine)
     if kind == "local":
         url, key, model = load_local()
-        chunk = local_qwen.CHUNK
+        chunk = local_qwen.fill_chunk()
         ok, detail = local_qwen.probe()
         if not ok:
             raise RuntimeError(

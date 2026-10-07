@@ -39,6 +39,22 @@ MTOOL_ALWAYS = (
 )
 MTOOL_DLL_IF_MARKED = ("winmm.dll", "version.dll")
 COPY_IGNORE = {"Thumbs.db", "desktop.ini", "debug.log"}
+MEDIA_DIR_NAMES = frozenset(
+    {
+        "audio",
+        "img",
+        "movies",
+        "movie",
+        "video",
+        "videos",
+        "bgm",
+        "bgs",
+        "me",
+        "se",
+        "pictures",
+        "graphics",
+    }
+)
 
 
 def log(msg: str) -> None:
@@ -120,7 +136,40 @@ def dest_folder(src_root: Path) -> Path:
 
 
 def ignore_copy(_dir: str, names: list[str]) -> list[str]:
-    return [n for n in names if n in COPY_IGNORE]
+    ignored = [n for n in names if n in COPY_IGNORE]
+    for name in names:
+        if name.lower() in MEDIA_DIR_NAMES and (Path(_dir) / name).is_dir():
+            ignored.append(name)
+    return ignored
+
+
+def link_media_dir(src_dir: Path, dest_dir: Path) -> None:
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    if dest_dir.exists():
+        return
+    try:
+        if os.name == "nt":
+            import _winapi
+
+            _winapi.CreateJunction(str(src_dir), str(dest_dir))
+        else:
+            os.symlink(src_dir, dest_dir, target_is_directory=True)
+        log(f"联接媒体目录: {dest_dir.name}")
+    except OSError as exc:
+        log(f"联接失败，改为复制 {src_dir.name}: {exc}")
+        shutil.copytree(src_dir, dest_dir, ignore=ignore_copy)
+
+
+def junction_media_dirs(src: Path, dest: Path) -> None:
+    for dirpath, dirnames, _filenames in os.walk(src):
+        rel = Path(dirpath).relative_to(src)
+        for name in list(dirnames):
+            if name.lower() not in MEDIA_DIR_NAMES:
+                continue
+            src_dir = Path(dirpath) / name
+            dest_dir = dest / rel / name
+            link_media_dir(src_dir, dest_dir)
+            dirnames.remove(name)
 
 
 def copy_game(src: Path, dest: Path) -> None:
@@ -130,6 +179,7 @@ def copy_game(src: Path, dest: Path) -> None:
     log(f"正在复制游戏到: {dest}")
     log("文件多的话会等一会儿，不要关窗口。")
     shutil.copytree(src, dest, ignore=ignore_copy)
+    junction_media_dirs(src, dest)
     log("复制完成。")
 
 
@@ -191,7 +241,9 @@ def translate_one(src_arg: Path, *, dry_run: bool, engine: str = "mt") -> int:
     other = detect_other_engine(src_arg if src_arg.is_dir() else src_arg.parent)
     root = find_game_root(src_arg)
     if root is None:
-        if other:
+        if other == "Unity":
+            log("这是 Unity 游戏。请把文件夹拖到「点我汉化Unity游戏.bat」。不要用 RPG Maker 一键。")
+        elif other:
             log(f"这是 {other} 游戏。现在一键只做 RPG Maker MV/MZ，这类以后再接。")
         else:
             log("没认出 RPG Maker MV/MZ（需要 Game.exe 旁边有 data\\System.json，或 www\\data\\System.json）。")

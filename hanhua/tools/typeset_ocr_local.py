@@ -80,6 +80,107 @@ def select_changed_images(root: Path, keys: set[str]) -> list[Path]:
     return selected
 
 
+def run_mit_folder(
+    root: Path,
+    src: Path,
+    dest: Path,
+    *,
+    trans: Path | None = None,
+    relaxed: bool = False,
+    crop_queue: list[str] | None = None,
+    lookup_log: Path | None = None,
+    config_file: Path | None = None,
+) -> int:
+    """Run MIT Lama on src images into dest. Does not restore art or overlay."""
+    trans = trans or (root / "translations.json")
+    if not trans.is_file():
+        print(f"missing {trans}", file=sys.stderr)
+        return 1
+    cfg = config_file or next((p for p in CONFIG_CANDIDATES if p.is_file()), None)
+    if cfg is None or not Path(cfg).is_file():
+        print("missing manga-image-translator config.json", file=sys.stderr)
+        return 1
+    for port in local_qwen.ports_that_block_gpu():
+        ok, detail = local_qwen.probe_port(port)
+        if ok:
+            print(f"llama-server is still on 127.0.0.1:{port}. Stop it before typeset (8GB GPU).")
+            print(detail)
+            return 3
+    mit_root, mit_py, font = mit_paths()
+    if not mit_py.is_file():
+        print(f"missing {mit_py}", file=sys.stderr)
+        return 1
+    dest.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["MIT_TRANSLATIONS_JSON"] = str(trans)
+    if relaxed:
+        env["MIT_LOOKUP_RELAXED"] = "1"
+    if crop_queue:
+        env["MIT_CROP_QUEUE"] = json.dumps(crop_queue, ensure_ascii=False)
+        env["MIT_SKIP_EMPTY_DEST"] = "0"
+    else:
+        env["MIT_SKIP_EMPTY_DEST"] = "1"
+    if lookup_log is not None:
+        env["MIT_LOOKUP_LOG"] = str(lookup_log)
+        if lookup_log.exists():
+            lookup_log.unlink()
+    cmd = [
+        str(mit_py),
+        "-m",
+        "manga_translator",
+        "local",
+        "--use-gpu",
+        "--overwrite",
+        "--ignore-errors",
+        "--font-path",
+        str(font),
+        "--config-file",
+        str(cfg),
+        "-i",
+        str(src),
+        "-o",
+        str(dest),
+        *local_qwen.mit_dict_args(),
+    ]
+    print("typeset", src, "->", dest)
+    print("lookup", trans)
+    images = local_qwen.list_image_files(src)
+    baseline = local_qwen.snapshot_output_mtimes(images, [dest])
+    local_qwen.emit(
+        "phase", "typeset", done=0, total=len(images), message=f"{src} -> {dest}"
+    )
+    rc = local_qwen.run_mit_with_page_progress(
+        cmd,
+        cwd=str(mit_root),
+        env=env,
+        phase="typeset",
+        total=len(images),
+        count=lambda: local_qwen.completed_image_pages(
+            images, output_dirs=[dest], baseline=baseline
+        ),
+    )
+    print(f"mit_exit={rc}")
+    return rc
+
+
+def after_mit_passes(root: Path, stems: list[str] | None, mit_rc: int) -> int:
+    """Column-crop tiny-font pass after whole-page Lama. Skip if MIT failed."""
+    if mit_rc != 0:
+        return 0
+    import crop_mit_local
+
+    names = stems or [path.stem for path in local_qwen.list_image_files(root / "typeset_in")]
+    if not names:
+        return 0
+    pasted = crop_mit_local.crop_mit_pages(
+        root, names, contents=False, bubbles=False, tiny_font=True
+    )
+    print(f"tiny-font pasted={pasted}", flush=True)
+    return pasted
+
+
 def stage_changed_input(root: Path, images: list[Path]) -> Path:
     staged = root / "typeset_changed"
     if staged.exists():
@@ -117,6 +218,20 @@ def main() -> int:
     if not trans.is_file():
         print(f"missing {trans}", file=sys.stderr)
         return 1
+    import bubble_recall_local
+
+    mapping = json.loads(trans.read_text(encoding="utf-8-sig"))
+    if isinstance(mapping, dict):
+        latin = bubble_recall_local.apply_latin_identity(mapping)
+        vocals = bubble_recall_local.apply_short_vocal_dest(mapping)
+        if latin or vocals:
+            trans.write_text(
+                json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            if latin:
+                print(f"latin-identity {len(latin)}")
+            if vocals:
+                print(f"short-vocal {len(vocals)}")
     src = find_input(root)
     restore_stems = pages
     if pages:
@@ -144,63 +259,11 @@ def main() -> int:
     local_qwen.isolate_image_folder(src, root / "ocr_sidecars")
     dest = root / "out"
     dest.mkdir(parents=True, exist_ok=True)
-    cfg = next((p for p in CONFIG_CANDIDATES if p.is_file()), None)
-    if cfg is None:
-        print("missing manga-image-translator config.json", file=sys.stderr)
-        return 1
-    for port in local_qwen.ports_that_block_gpu():
-        ok, detail = local_qwen.probe_port(port)
-        if ok:
-            print(f"llama-server is still on 127.0.0.1:{port}. Stop it before typeset.")
-            print(detail)
-            return 3
-    mit_root, mit_py, font = mit_paths()
-    if not mit_py.is_file():
-        print(f"missing {mit_py}", file=sys.stderr)
-        return 1
-    env = os.environ.copy()
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["MIT_TRANSLATIONS_JSON"] = str(trans)
-    cmd = [
-        str(mit_py),
-        "-m",
-        "manga_translator",
-        "local",
-        "--use-gpu",
-        "--overwrite",
-        "--ignore-errors",
-        "--font-path",
-        str(font),
-        "--config-file",
-        str(cfg),
-        "-i",
-        str(src),
-        "-o",
-        str(dest),
-        *local_qwen.mit_dict_args(),
-    ]
-    print("typeset", src, "->", dest)
-    print("lookup", trans)
-    images = local_qwen.list_image_files(src)
-    baseline = local_qwen.snapshot_output_mtimes(images, [dest])
-    local_qwen.emit(
-        "phase", "typeset", done=0, total=len(images), message=f"{src} -> {dest}"
-    )
-    rc = local_qwen.run_mit_with_page_progress(
-        cmd,
-        cwd=str(mit_root),
-        env=env,
-        phase="typeset",
-        total=len(images),
-        count=lambda: local_qwen.completed_image_pages(
-            images, output_dirs=[dest], baseline=baseline
-        ),
-    )
-    print(f"mit_exit={rc}")
+    rc = run_mit_folder(root, src, dest)
     import bubble_recall_local
 
     bubble_recall_local.restore_source_art(root, restore_stems)
+    after_mit_passes(root, restore_stems, rc)
     if rc == 0:
         local_qwen.emit("done", "typeset", output=str(dest), message="嵌字完成")
         return 0
