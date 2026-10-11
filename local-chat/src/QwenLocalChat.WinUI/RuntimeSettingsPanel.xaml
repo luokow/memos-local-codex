@@ -2,48 +2,22 @@
 <UserControl
     x:Class="QwenLocalChat_WinUI.RuntimeSettingsPanel"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
     <Grid x:Name="SettingsRoot">
-        <!-- Dimmed scrim behind the drawer -->
-        <Rectangle x:Name="Scrim" AutomationProperties.AutomationId="SettingsScrim" AutomationProperties.Name="点击左侧空白关闭设置" Fill="#CC000000" Opacity="0" IsHitTestVisible="False" Tapped="Scrim_Tapped" />
-
-        <!-- Soft left shadow strip so the drawer lifts off the chat surface -->
-        <Rectangle x:Name="ShadowStrip" Width="24" HorizontalAlignment="Right" Margin="0,0,500,0" IsHitTestVisible="False" Opacity="0">
-            <Rectangle.Fill>
-                <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
-                    <GradientStop Offset="0" Color="#00000000" />
-                    <GradientStop Offset="1" Color="#88000000" />
-                </LinearGradientBrush>
-            </Rectangle.Fill>
-        </Rectangle>
-
         <Border
             x:Name="PanelShell"
-            Width="500"
-            HorizontalAlignment="Right"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
             Background="{StaticResource RaisedBrush}"
-            BorderBrush="{StaticResource StrongBorderBrush}"
-            BorderThickness="1,0,0,0">
-            <Grid>
-                <!-- Cool accent edge -->
-                <Rectangle Width="3" HorizontalAlignment="Left" VerticalAlignment="Stretch">
-                    <Rectangle.Fill>
-                        <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
-                            <GradientStop Offset="0" Color="#66D6DCE5" />
-                            <GradientStop Offset="0.45" Color="#B3A8C0D8" />
-                            <GradientStop Offset="1" Color="#3399AABB" />
-                        </LinearGradientBrush>
-                    </Rectangle.Fill>
-                </Rectangle>
-
-                <Grid Padding="16,12,14,12" Margin="3,0,0,0" RowSpacing="10">
+            BorderThickness="0">
+            <Grid x:Name="SettingsPageColumn" AutomationProperties.AutomationId="SettingsPageColumn" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Padding="36,24,36,16" RowSpacing="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <StackPanel Spacing="10">
+                <StackPanel x:Name="SettingsHeaderStack" MaxWidth="1064" HorizontalAlignment="Stretch" Spacing="10">
                     <Grid ColumnSpacing="10">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -59,488 +33,438 @@
                         </StackPanel>
                         <Button Grid.Column="1" AutomationProperties.AutomationId="CloseSettingsButton" AutomationProperties.Name="关闭设置" Content="关闭" Click="CloseButton_Click" Style="{StaticResource ToolbarButtonStyle}" ToolTipService.ToolTip="关闭面板；若有未保存修改会先确认" VerticalAlignment="Top" />
                     </Grid>
-                    <!-- Short glossary only; each section card already says when it takes effect. -->
-                    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="12,10">
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="保存后何时生效" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
-                            <TextBlock Text="点「保存」先写入磁盘。下方每个分区标题旁会写明生效时机，含义如下：" Style="{StaticResource SettingsSectionHintStyle}" />
-                            <Grid ColumnSpacing="10" RowSpacing="6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <Border Background="#223A4A62" CornerRadius="4" Padding="8,3" VerticalAlignment="Center" MinWidth="52">
-                                    <TextBlock Text="即时" FontFamily="Microsoft YaHei UI" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" />
-                                </Border>
-                                <TextBlock Grid.Column="1" Text="保存后，下一句对话就用新参数。" Style="{StaticResource SettingsSectionHintStyle}" VerticalAlignment="Center" />
-                                <Border Grid.Row="1" Background="#334A3A22" CornerRadius="4" Padding="8,3" VerticalAlignment="Center" MinWidth="52">
-                                    <TextBlock Text="需重启" FontFamily="Microsoft YaHei UI" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center" />
-                                </Border>
-                                <TextBlock Grid.Row="1" Grid.Column="1" Text="要先停止模型再打开软件，新参数才会进模型进程。" Style="{StaticResource SettingsSectionHintStyle}" VerticalAlignment="Center" />
-                            </Grid>
-                        </StackPanel>
-                    </Border>
+                    <toolkit:SettingsCard Header="保存后何时生效" Description="点「保存」先写入磁盘。即时：下一句对话就用新参数。需重启：要先停止模型再打开软件，新参数才会进模型进程。" />
                 </StackPanel>
 
-                <ScrollViewer x:Name="SettingsContentScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                    <StackPanel Padding="0,2,6,8" Spacing="12">
-                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="启动与驻留" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="打开后先显示所选页面。未完成的汉化或视频只提示，不改页面。下面再决定是否启动模型。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                </StackPanel>
-                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <ComboBox x:Name="StartupPageBox" AutomationProperties.AutomationId="StartupPageSetting" AutomationProperties.Name="打开应用后显示的页面" Header="打开后显示">
-                                    <ComboBoxItem Content="聊天" Tag="chat" />
-                                    <ComboBoxItem Content="视频" Tag="video" />
-                                    <ComboBoxItem Content="汉化" Tag="hanhua" />
-                                </ComboBox>
-                                <ComboBox x:Name="StartupModelBox" AutomationProperties.AutomationId="StartupModelSetting" AutomationProperties.Name="打开应用后启动的模型" Header="打开应用后启动">
-                                    <ComboBoxItem Content="文本模型" Tag="text" />
-                                    <ComboBoxItem Content="视频模型" Tag="video" />
-                                    <ComboBoxItem Content="不自动启动" Tag="none" />
-                                </ComboBox>
-                                <ToggleSwitch
-                                    x:Name="ModelExclusivityToggle"
-                                    AutomationProperties.AutomationId="ModelExclusivitySetting"
-                                    AutomationProperties.Name="聊天、视频与汉化显存互斥"
-                                    Header="聊天、视频与汉化显存互斥"
-                                    OnContent="开启"
-                                    OffContent="关闭" />
-                            </StackPanel>
-                        </Border>
-                        <StackPanel x:Name="TextSettingsSection" Spacing="12">
-                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="当前文本模型" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="选择已配置的本地模型档案；名称、API model 和启动参数均来自档案。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                </StackPanel>
-                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <ComboBox
-                                    x:Name="TextModelProfileBox"
-                                    AutomationProperties.AutomationId="TextModelProfileSetting"
-                                    AutomationProperties.Name="当前文本模型"
-                                    Header="模型档案"
-                                    HorizontalAlignment="Stretch"
-                                    DisplayMemberPath="DisplayName"
-                                    SelectionChanged="TextModelProfileBox_SelectionChanged" />
-                                <TextBlock Text="首次发送时会按需启动；也可先启动检查服务。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                <TextBlock x:Name="TextModelProfileDetails" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                <Border x:Name="TextSettingsRecordHost" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock x:Name="TextModelSettingsCardTitle" Text="此模型的设置记录" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="TextModelSettingsCardSummary" AutomationProperties.AutomationId="TextModelSettingsCardSummary" Text="生成、历史轮数和附件按当前档案单独保存。切换档案后，下面的设置换成该档案自己的记录。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Border>
-                                <TextBlock x:Name="TextModelOperationStatus" AutomationProperties.AutomationId="TextModelOperationStatus" Style="{StaticResource SettingsSectionHintStyle}" />
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <Button x:Name="TextImportButton" AutomationProperties.AutomationId="TextImportButton" AutomationProperties.Name="选择本地文本模型目录" Content="选择本地目录" Click="TextImportButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
-                                    <Button x:Name="ReleaseTextModelButton" Grid.Column="1" AutomationProperties.AutomationId="ReleaseTextModelButton" AutomationProperties.Name="释放文本模型" Content="释放模型" Click="ReleaseTextModelButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-                        <!-- Each settings group is a bordered card so section boundaries read at a glance. -->
-                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="生成" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="即时生效，下一句对话使用" Style="{StaticResource SettingsSectionHintStyle}" />
-                                </StackPanel>
-                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <Grid ColumnSpacing="12" RowSpacing="10">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <NumberBox x:Name="MaxOutputTokensBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="MaxOutputTokensSetting" Header="最大输出 Token" Minimum="128" Maximum="28672" SmallChange="256" LargeChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="单次最多生成多少 token。默认 4096；须为上下文至少留 512。超时过短时请求会自动按输出量放宽。" />
-                                    <!-- SmallChange/LargeChange/NumberFormatter for 0.1 steps are set in code-behind; XAML double literals for 0.1 are unreliable on WinUI NumberBox. -->
-                                    <NumberBox x:Name="TemperatureBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="1" AutomationProperties.AutomationId="TemperatureSetting" Header="温度" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="越高越发散。长文可试 0.5～0.7" />
-                                    <NumberBox x:Name="RequestTimeoutBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="1" AutomationProperties.AutomationId="RequestTimeoutSetting" Header="请求超时（秒）" Minimum="30" Maximum="1800" SmallChange="30" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 900。若小于「输出÷20+60」保存会提示；发送时也会自动兜底。" />
-                                    <ToggleSwitch x:Name="StreamResponsesToggle" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="StreamResponsesSetting" Header="流式输出" OnContent="开启" OffContent="关闭" VerticalAlignment="Bottom" />
-                                    <!-- Anti-repetition knobs stay in place; tooltips only — no extra chrome. -->
-                                    <NumberBox x:Name="FrequencyPenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="2" AutomationProperties.AutomationId="FrequencyPenaltySetting" Header="频率惩罚" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）。复读严重时可试 0.3～0.5，过高易词串散乱" />
-                                    <NumberBox x:Name="PresencePenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="PresencePenaltySetting" Header="存在惩罚" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）" />
-                                    <NumberBox x:Name="RepeatPenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="3" AutomationProperties.AutomationId="RepeatPenaltySetting" Header="重复惩罚" Minimum="1" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 1.0（关闭）。复读时可试 1.08～1.15" />
-                                    <NumberBox x:Name="DryMultiplierBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="3" Grid.Column="1" AutomationProperties.AutomationId="DryMultiplierSetting" Header="DRY 抗重复" Minimum="0" Maximum="5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）。长程复读时可试 0.8～1.2" />
-                                    <NumberBox x:Name="RepeatLastNBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Row="4" AutomationProperties.AutomationId="RepeatLastNSetting" Header="重复检测窗口" Minimum="0" Maximum="2048" SmallChange="32" LargeChange="128" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 64。开启重复惩罚时才有意义" />
-                                    <ToggleSwitch x:Name="ClientRepetitionGuardToggle" Grid.Row="4" Grid.Column="1" AutomationProperties.AutomationId="ClientRepetitionGuardSetting" Header="输出去重裁尾" OnContent="开启" OffContent="关闭" VerticalAlignment="Bottom" ToolTipService.ToolTip="默认关闭。开启后客户端会裁段落/口号复读，并可能提前停流；误判会让长文变短变乱" />
-                                    <ToggleSwitch x:Name="AutoTightenOutputToggle" Grid.Row="5" AutomationProperties.AutomationId="AutoTightenOutputSetting" Header="按目标字数收紧输出" OnContent="开启" OffContent="关闭" VerticalAlignment="Bottom" ToolTipService.ToolTip="识别「约4000字」等提示，把本轮 max_tokens 收到接近目标；默认关闭" />
-                                    <ToggleSwitch x:Name="SegmentedLongFormToggle" Grid.Row="5" Grid.Column="1" AutomationProperties.AutomationId="SegmentedLongFormSetting" Header="长文分段写作" OnContent="开启" OffContent="关闭" VerticalAlignment="Bottom" ToolTipService.ToolTip="约≥2000字时拆成多段；默认关闭" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
+                <ScrollViewer x:Name="SettingsContentScrollViewer" Grid.Row="1" VerticalAlignment="Stretch" HorizontalAlignment="Stretch" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="SettingsCardStack" MaxWidth="1064" HorizontalAlignment="Stretch" Padding="0,2,6,8" Spacing="4">
+                        <TextBlock Text="启动与驻留" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,8,0,2" />
+                        <toolkit:SettingsCard Header="打开后显示" Description="未完成的汉化或视频只提示，不改页面。">
+                            <ComboBox x:Name="StartupPageBox" AutomationProperties.AutomationId="StartupPageSetting" AutomationProperties.Name="打开应用后显示的页面" MinWidth="160">
+                                <ComboBoxItem Content="聊天" Tag="chat" />
+                                <ComboBoxItem Content="视频" Tag="video" />
+                                <ComboBoxItem Content="汉化" Tag="hanhua" />
+                            </ComboBox>
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard Header="打开应用后启动" Description="下面再决定是否启动模型。">
+                            <ComboBox x:Name="StartupModelBox" AutomationProperties.AutomationId="StartupModelSetting" AutomationProperties.Name="打开应用后启动的模型" MinWidth="160">
+                                <ComboBoxItem Content="文本模型" Tag="text" />
+                                <ComboBoxItem Content="视频模型" Tag="video" />
+                                <ComboBoxItem Content="不自动启动" Tag="none" />
+                            </ComboBox>
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard Header="聊天、视频与汉化显存互斥">
+                            <ToggleSwitch x:Name="ModelExclusivityToggle" AutomationProperties.AutomationId="ModelExclusivitySetting" AutomationProperties.Name="聊天、视频与汉化显存互斥" OnContent="开启" OffContent="关闭" />
+                        </toolkit:SettingsCard>
 
-                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="会话" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="即时生效，无需重启模型" Style="{StaticResource SettingsSectionHintStyle}" />
+                        <StackPanel x:Name="TextSettingsSection" Spacing="4">
+                            <TextBlock Text="当前文本模型" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <toolkit:SettingsCard Header="模型档案" Description="名称、API model 和启动参数均来自档案。">
+                                <ComboBox x:Name="TextModelProfileBox" AutomationProperties.AutomationId="TextModelProfileSetting" AutomationProperties.Name="当前文本模型" MinWidth="220" DisplayMemberPath="DisplayName" SelectionChanged="TextModelProfileBox_SelectionChanged" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="档案说明" ContentAlignment="Vertical" HorizontalContentAlignment="Left">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="首次发送时会按需启动；也可先启动检查服务。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="TextModelProfileDetails" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
                                 </StackPanel>
-                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <ComboBox
-                                    x:Name="SessionSortModeBox"
-                                    AutomationProperties.AutomationId="SessionSortModeSetting"
-                                    Header="列表排序"
-                                    HorizontalAlignment="Stretch"
-                                    MinWidth="200"
-                                    SelectedIndex="0"
-                                    ToolTipService.ToolTip="创建时间：新建在上且聊天时不跳位；最近更新：刚聊过的会话排到最前">
+                            </toolkit:SettingsCard>
+                            <Border x:Name="TextSettingsRecordHost" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                <StackPanel Spacing="4">
+                                    <TextBlock x:Name="TextModelSettingsCardTitle" Text="此模型的设置记录" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="TextModelSettingsCardSummary" AutomationProperties.AutomationId="TextModelSettingsCardSummary" Text="生成、历史轮数和附件按当前档案单独保存。切换档案后，下面的设置换成该档案自己的记录。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <TextBlock x:Name="TextModelOperationStatus" AutomationProperties.AutomationId="TextModelOperationStatus" Style="{StaticResource SettingsSectionHintStyle}" />
+                            <toolkit:SettingsCard Header="模型文件">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="TextImportButton" MinWidth="120" AutomationProperties.AutomationId="TextImportButton" AutomationProperties.Name="选择本地文本模型目录" Content="选择本地目录" Click="TextImportButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                    <Button x:Name="ReleaseTextModelButton" MinWidth="120" AutomationProperties.AutomationId="ReleaseTextModelButton" AutomationProperties.Name="释放文本模型" Content="释放模型" Click="ReleaseTextModelButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                </StackPanel>
+                            </toolkit:SettingsCard>
+
+                            <TextBlock Text="生成" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <TextBlock Text="即时生效，下一句对话使用" Style="{StaticResource SettingsSectionHintStyle}" Margin="1,0,0,2" />
+                            <toolkit:SettingsCard Header="最大输出 Token" Description="默认 4096。须为上下文至少留 512。">
+                                <NumberBox x:Name="MaxOutputTokensBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="MaxOutputTokensSetting" AutomationProperties.Name="最大输出 Token" Minimum="128" Maximum="28672" SmallChange="256" LargeChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="单次最多生成多少 token。默认 4096；须为上下文至少留 512。超时过短时请求会自动按输出量放宽。" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="温度" Description="越高越发散。长文可试 0.5～0.7。">
+                                <NumberBox x:Name="TemperatureBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="TemperatureSetting" AutomationProperties.Name="温度" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="越高越发散。长文可试 0.5～0.7" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="请求超时（秒）" Description="默认 900。过短时发送会自动放宽。">
+                                <NumberBox x:Name="RequestTimeoutBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="RequestTimeoutSetting" AutomationProperties.Name="请求超时（秒）" Minimum="30" Maximum="1800" SmallChange="30" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 900。若小于「输出÷20+60」保存会提示；发送时也会自动兜底。" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="流式输出">
+                                <ToggleSwitch x:Name="StreamResponsesToggle" AutomationProperties.AutomationId="StreamResponsesSetting" AutomationProperties.Name="流式输出" OnContent="开启" OffContent="关闭" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsExpander x:Name="GenerationSettingsExpander" Header="少用的生成项" Description="频率惩罚、DRY 和长文分段。默认关闭。">
+                                <toolkit:SettingsExpander.Items>
+                                    <toolkit:SettingsCard Header="频率惩罚" Description="默认 0。复读严重时可试 0.3～0.5。">
+                                        <NumberBox x:Name="FrequencyPenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="FrequencyPenaltySetting" AutomationProperties.Name="频率惩罚" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）。复读严重时可试 0.3～0.5，过高易词串散乱" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="存在惩罚" Description="默认 0。">
+                                        <NumberBox x:Name="PresencePenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="PresencePenaltySetting" AutomationProperties.Name="存在惩罚" Minimum="0" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="重复惩罚" Description="默认 1.0。复读时可试 1.08～1.15。">
+                                        <NumberBox x:Name="RepeatPenaltyBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="RepeatPenaltySetting" AutomationProperties.Name="重复惩罚" Minimum="1" Maximum="2" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 1.0（关闭）。复读时可试 1.08～1.15" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="DRY 抗重复" Description="默认 0。长程复读时可试 0.8～1.2。">
+                                        <NumberBox x:Name="DryMultiplierBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="DryMultiplierSetting" AutomationProperties.Name="DRY 抗重复" Minimum="0" Maximum="5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 0（关闭）。长程复读时可试 0.8～1.2" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="重复检测窗口" Description="默认 64。开启重复惩罚时才有意义。">
+                                        <NumberBox x:Name="RepeatLastNBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="RepeatLastNSetting" AutomationProperties.Name="重复检测窗口" Minimum="0" Maximum="2048" SmallChange="32" LargeChange="128" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="默认 64。开启重复惩罚时才有意义" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="输出去重裁尾" Description="默认关闭。误判会让长文变短。">
+                                        <ToggleSwitch x:Name="ClientRepetitionGuardToggle" AutomationProperties.AutomationId="ClientRepetitionGuardSetting" AutomationProperties.Name="输出去重裁尾" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="默认关闭。开启后客户端会裁段落/口号复读，并可能提前停流；误判会让长文变短变乱" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="按目标字数收紧输出" Description="识别「约4000字」等提示。默认关闭。">
+                                        <ToggleSwitch x:Name="AutoTightenOutputToggle" AutomationProperties.AutomationId="AutoTightenOutputSetting" AutomationProperties.Name="按目标字数收紧输出" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="识别「约4000字」等提示，把本轮 max_tokens 收到接近目标；默认关闭" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="长文分段写作" Description="约 ≥2000 字时拆成多段。默认关闭。">
+                                        <ToggleSwitch x:Name="SegmentedLongFormToggle" AutomationProperties.AutomationId="SegmentedLongFormSetting" AutomationProperties.Name="长文分段写作" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="约≥2000字时拆成多段；默认关闭" />
+                                    </toolkit:SettingsCard>
+                                </toolkit:SettingsExpander.Items>
+                            </toolkit:SettingsExpander>
+
+                            <TextBlock Text="会话" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <toolkit:SettingsCard Header="列表排序" Description="即时生效，无需重启模型。">
+                                <ComboBox x:Name="SessionSortModeBox" AutomationProperties.AutomationId="SessionSortModeSetting" AutomationProperties.Name="列表排序" MinWidth="220" SelectedIndex="0" ToolTipService.ToolTip="创建时间：新建在上且聊天时不跳位；最近更新：刚聊过的会话排到最前">
                                     <ComboBoxItem Content="按创建时间（新会话在上）" Tag="created" />
                                     <ComboBoxItem Content="按最近更新（刚聊过的在上）" Tag="updated" />
                                 </ComboBox>
-                            </StackPanel>
-                        </Border>
+                            </toolkit:SettingsCard>
 
-                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="上下文与记忆" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="窗口/GPU 相关需重启；轮数与召回即时" Style="{StaticResource SettingsSectionHintStyle}" />
+                            <TextBlock Text="上下文与记忆" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <TextBlock Text="窗口和 GPU 相关需重启；轮数与召回即时。" Style="{StaticResource SettingsSectionHintStyle}" Margin="1,0,0,2" />
+                            <toolkit:SettingsCard Header="上下文窗口" Description="修改后需重启模型。">
+                                <NumberBox x:Name="ContextSizeBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="ContextSizeSetting" AutomationProperties.Name="上下文窗口" Minimum="2048" Maximum="32768" SmallChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="模型服务的上下文容量，修改后需重启模型" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="历史轮数" Description="参与上下文的最近完整问答轮数。默认 40。">
+                                <NumberBox x:Name="MaxHistoryRoundsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="MaxHistoryRoundsSetting" AutomationProperties.Name="历史轮数" Minimum="1" Maximum="100" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="参与上下文的最近完整问答轮数；默认 40" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="MemOS 召回">
+                                <NumberBox x:Name="MemosTopKBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="MemosTopKSetting" AutomationProperties.Name="MemOS 召回" Minimum="1" Maximum="20" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="主窗口开关" Description="请在主窗口底部切换；此处仅作状态对照。" ContentAlignment="Vertical" HorizontalContentAlignment="Left">
+                                <StackPanel Spacing="4">
+                                    <TextBlock x:Name="MemosStatusReadonlyText" AutomationProperties.AutomationId="MemosStatusReadonlyText" Text="MemOS 长期记忆：关闭" Style="{StaticResource SettingsSectionHintStyle}" />
+                                    <TextBlock x:Name="LogStatusReadonlyText" AutomationProperties.AutomationId="LogStatusReadonlyText" Text="聊天日志：关闭" Style="{StaticResource SettingsSectionHintStyle}" />
                                 </StackPanel>
-                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <NumberBox x:Name="ContextSizeBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="ContextSizeSetting" Header="上下文窗口" Minimum="2048" Maximum="32768" SmallChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="模型服务的上下文容量，修改后需重启模型" />
-                                    <NumberBox x:Name="MaxHistoryRoundsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="1" AutomationProperties.AutomationId="MaxHistoryRoundsSetting" Header="历史轮数" Minimum="1" Maximum="100" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="参与上下文的最近完整问答轮数；默认 40" />
-                                    <NumberBox x:Name="MemosTopKBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="2" AutomationProperties.AutomationId="MemosTopKSetting" Header="MemOS 召回" Minimum="1" Maximum="20" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                </Grid>
-                                <Border Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8">
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="主窗口开关（只读）" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
-                                        <TextBlock x:Name="MemosStatusReadonlyText" AutomationProperties.AutomationId="MemosStatusReadonlyText" Text="MemOS 长期记忆：关闭" Style="{StaticResource SettingsSectionHintStyle}" />
-                                        <TextBlock x:Name="LogStatusReadonlyText" AutomationProperties.AutomationId="LogStatusReadonlyText" Text="聊天日志：关闭" Style="{StaticResource SettingsSectionHintStyle}" />
-                                        <TextBlock Text="请在主窗口底部切换；此处仅作状态对照。" Style="{StaticResource SettingsSectionHintStyle}" />
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </Border>
+                            </toolkit:SettingsCard>
 
-                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="模型启动" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="需停止模型后重开。并发&gt;1 时用共享上下文池：只开一路可尽量用满窗口，多路同时生成才分摊" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                </StackPanel>
-                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <Grid ColumnSpacing="12" RowSpacing="10">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                    <NumberBox x:Name="GpuLayersBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="GpuLayersSetting" Header="GPU 层" Minimum="0" Maximum="999" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <NumberBox x:Name="ParallelSlotsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="1" AutomationProperties.AutomationId="ParallelSlotsSetting" Header="并发槽位" Minimum="1" Maximum="8" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="可同时生成的会话数。启用共享 KV：平时只跑一路时尽量用满「上下文窗口」；多路同时生成时才共享同一池，无需为并发永久切短单路窗口。" />
-                                    <NumberBox x:Name="StartupTimeoutBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" Grid.Column="2" AutomationProperties.AutomationId="StartupTimeoutSetting" Header="启动等待（秒）" Minimum="30" Maximum="600" SmallChange="30" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <ToggleSwitch x:Name="ReasoningToggle" Grid.Row="1" AutomationProperties.AutomationId="ReasoningSetting" Header="思考模式" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="控制模型服务的思考模式，修改后需重启模型" />
-                                    <ToggleSwitch x:Name="JinjaToggle" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="JinjaSetting" Header="Jinja 模板" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="用模型自带对话模板，建议保持开启" />
-                                </Grid>
-                                <TextBox x:Name="ModelAliasBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="ModelAliasSetting" Header="模型别名" />
-                                <TextBox x:Name="ModelPathBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="ModelPathSetting" Header="模型文件（绝对路径或相对项目根）" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
+                            <TextBlock Text="模型启动" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <TextBlock Text="需停止模型后重开。并发大于 1 时用共享上下文池。" Style="{StaticResource SettingsSectionHintStyle}" Margin="1,0,0,2" TextWrapping="Wrap" />
+                            <toolkit:SettingsCard Header="GPU 层">
+                                <NumberBox x:Name="GpuLayersBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="GpuLayersSetting" AutomationProperties.Name="GPU 层" Minimum="0" Maximum="999" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="并发槽位" Description="多路同时生成时才共享同一上下文池。">
+                                <NumberBox x:Name="ParallelSlotsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="ParallelSlotsSetting" AutomationProperties.Name="并发槽位" Minimum="1" Maximum="8" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" ToolTipService.ToolTip="可同时生成的会话数。启用共享 KV：平时只跑一路时尽量用满「上下文窗口」；多路同时生成时才共享同一池，无需为并发永久切短单路窗口。" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="启动等待（秒）">
+                                <NumberBox x:Name="StartupTimeoutBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="StartupTimeoutSetting" AutomationProperties.Name="启动等待（秒）" Minimum="30" Maximum="600" SmallChange="30" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="思考模式" Description="修改后需重启模型。">
+                                <ToggleSwitch x:Name="ReasoningToggle" AutomationProperties.AutomationId="ReasoningSetting" AutomationProperties.Name="思考模式" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="控制模型服务的思考模式，修改后需重启模型" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="Jinja 模板" Description="用模型自带对话模板，建议保持开启。">
+                                <ToggleSwitch x:Name="JinjaToggle" AutomationProperties.AutomationId="JinjaSetting" AutomationProperties.Name="Jinja 模板" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="用模型自带对话模板，建议保持开启" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="模型别名">
+                                <TextBox x:Name="ModelAliasBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="ModelAliasSetting" AutomationProperties.Name="模型别名" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="模型文件" Description="绝对路径或相对项目根。">
+                                <TextBox x:Name="ModelPathBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="ModelPathSetting" AutomationProperties.Name="模型文件" TextWrapping="Wrap" />
+                            </toolkit:SettingsCard>
 
-                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="本地服务" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="端口变更需重启模型" Style="{StaticResource SettingsSectionHintStyle}" />
-                                </StackPanel>
-                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <Grid ColumnSpacing="12" RowSpacing="8">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                    <NumberBox x:Name="PortBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="PortSetting" Header="端口" Minimum="1024" Maximum="65535" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <Border Grid.Column="1" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8" VerticalAlignment="Top">
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Text="固定安全边界" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" />
-                                            <TextBlock Text="服务监听 127.0.0.1；子进程使用本地模型配置。" Style="{StaticResource SettingsSectionHintStyle}" />
-                                        </StackPanel>
-                                    </Border>
-                                    <ToggleSwitch x:Name="AutoStartOnDemandToggle" AutomationProperties.AutomationId="AutoStartOnDemandSetting" Grid.Row="1" Grid.ColumnSpan="2" Header="记忆调用按需启动模型" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="MemOS 的 recall 和 remember 在服务停止时可启动共享模型；健康检查和列表查询不会启动" />
-                                </Grid>
-                            </StackPanel>
-                        </Border>
+                            <TextBlock Text="本地服务" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <toolkit:SettingsCard Header="端口" Description="变更后需重启模型。">
+                                <NumberBox x:Name="PortBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="PortSetting" AutomationProperties.Name="端口" Minimum="1024" Maximum="65535" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="固定安全边界" Description="服务监听 127.0.0.1；子进程使用本地模型配置。" />
+                            <toolkit:SettingsCard Header="记忆调用按需启动模型" Description="健康检查和列表查询不会启动。">
+                                <ToggleSwitch x:Name="AutoStartOnDemandToggle" AutomationProperties.AutomationId="AutoStartOnDemandSetting" AutomationProperties.Name="记忆调用按需启动模型" OnContent="开启" OffContent="关闭" ToolTipService.ToolTip="MemOS 的 recall 和 remember 在服务停止时可启动共享模型；健康检查和列表查询不会启动" />
+                            </toolkit:SettingsCard>
 
-                        <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="聊天附件" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock Text="即时。默认最多 4 个文件、单文件 256 KB，可调到 9 个、16 MB。当前 Qwen 文本模型只会读文本和 PDF 抽出的文字。打开图片/音频/视频只是放开选择器，方便以后换多模态档案。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                </StackPanel>
-                                <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                <Grid ColumnSpacing="12" RowSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <ToggleSwitch x:Name="ChatAttachTextToggle" AutomationProperties.AutomationId="ChatAttachTextSetting" Header="文本" OnContent="允许" OffContent="关闭" />
-                                    <ToggleSwitch x:Name="ChatAttachImageToggle" Grid.Column="1" AutomationProperties.AutomationId="ChatAttachImageSetting" Header="图片" OnContent="允许" OffContent="关闭" />
-                                    <ToggleSwitch x:Name="ChatAttachAudioToggle" Grid.Row="1" AutomationProperties.AutomationId="ChatAttachAudioSetting" Header="音频" OnContent="允许" OffContent="关闭" />
-                                    <ToggleSwitch x:Name="ChatAttachVideoToggle" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="ChatAttachVideoSetting" Header="视频" OnContent="允许" OffContent="关闭" />
-                                    <NumberBox x:Name="ChatAttachMaxFilesBox" Grid.Row="2" AutomationProperties.AutomationId="ChatAttachMaxFilesSetting" Header="最多文件数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="9" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <NumberBox x:Name="ChatAttachMaxKbBox" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="ChatAttachMaxKbSetting" Header="单文件上限（KB）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="4" Maximum="16384" SmallChange="64" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                </Grid>
-                                <TextBox x:Name="ChatAttachExtraExtensionsBox" AutomationProperties.AutomationId="ChatAttachExtraExtensionsSetting" Header="额外文本扩展名" PlaceholderText=".rst, .tex" Style="{StaticResource CompactSettingsTextBoxStyle}" />
-                            </StackPanel>
-                        </Border>
-
+                            <TextBlock Text="聊天附件" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <TextBlock Text="即时。默认最多 4 个文件、单文件 256 KB。当前文本模型只读文本和 PDF 抽出的文字。" Style="{StaticResource SettingsSectionHintStyle}" Margin="1,0,0,2" TextWrapping="Wrap" />
+                            <toolkit:SettingsCard Header="文本">
+                                <ToggleSwitch x:Name="ChatAttachTextToggle" AutomationProperties.AutomationId="ChatAttachTextSetting" AutomationProperties.Name="文本" OnContent="允许" OffContent="关闭" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="图片">
+                                <ToggleSwitch x:Name="ChatAttachImageToggle" AutomationProperties.AutomationId="ChatAttachImageSetting" AutomationProperties.Name="图片" OnContent="允许" OffContent="关闭" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="音频">
+                                <ToggleSwitch x:Name="ChatAttachAudioToggle" AutomationProperties.AutomationId="ChatAttachAudioSetting" AutomationProperties.Name="音频" OnContent="允许" OffContent="关闭" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="视频">
+                                <ToggleSwitch x:Name="ChatAttachVideoToggle" AutomationProperties.AutomationId="ChatAttachVideoSetting" AutomationProperties.Name="视频" OnContent="允许" OffContent="关闭" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="最多文件数" Description="可调到 9 个。">
+                                <NumberBox x:Name="ChatAttachMaxFilesBox" AutomationProperties.AutomationId="ChatAttachMaxFilesSetting" AutomationProperties.Name="最多文件数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="9" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="单文件上限（KB）" Description="可调到 16 MB。">
+                                <NumberBox x:Name="ChatAttachMaxKbBox" AutomationProperties.AutomationId="ChatAttachMaxKbSetting" AutomationProperties.Name="单文件上限（KB）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="4" Maximum="16384" SmallChange="64" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="额外文本扩展名">
+                                <TextBox x:Name="ChatAttachExtraExtensionsBox" AutomationProperties.AutomationId="ChatAttachExtraExtensionsSetting" AutomationProperties.Name="额外文本扩展名" PlaceholderText=".rst, .tex" Style="{StaticResource CompactSettingsTextBoxStyle}" />
+                            </toolkit:SettingsCard>
                         </StackPanel>
-                        <StackPanel x:Name="VideoSettingsSection" Visibility="Collapsed" Spacing="12">
-                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                                <StackPanel Spacing="8">
-                                    <StackPanel Spacing="2">
-                                        <TextBlock Text="当前视频模型" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                        <TextBlock Text="选择已配置的 ComfyUI 工作流档案；节点映射和能力范围随模型切换。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                    <ComboBox
-                                        x:Name="VideoModelProfileBox"
-                                        AutomationProperties.AutomationId="VideoModelProfileSetting"
-                                        AutomationProperties.Name="当前视频模型"
-                                        Header="模型档案"
-                                        HorizontalAlignment="Stretch"
-                                        DisplayMemberPath="DisplayName"
-                                        SelectionChanged="VideoModelProfileBox_SelectionChanged" />
+
+                        <StackPanel x:Name="VideoSettingsSection" Visibility="Collapsed" Spacing="4">
+                            <TextBlock Text="当前视频模型" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <toolkit:SettingsCard Header="模型档案" Description="节点映射和能力范围随模型切换。">
+                                <ComboBox x:Name="VideoModelProfileBox" AutomationProperties.AutomationId="VideoModelProfileSetting" AutomationProperties.Name="当前视频模型" MinWidth="220" DisplayMemberPath="DisplayName" SelectionChanged="VideoModelProfileBox_SelectionChanged" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="档案说明" ContentAlignment="Vertical" HorizontalContentAlignment="Left">
+                                <StackPanel Spacing="4">
                                     <TextBlock Text="首次开始生成时会按需启动；也可先启动检查服务。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
                                     <TextBlock x:Name="VideoModelProfileDetails" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                    <Border x:Name="VideoSettingsRecordHost" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8">
-                                        <StackPanel Spacing="4">
-                                            <TextBlock x:Name="VideoModelSettingsCardTitle" Text="此模型的设置记录" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
-                                            <TextBlock x:Name="VideoModelSettingsCardSummary" AutomationProperties.AutomationId="VideoModelSettingsCardSummary" Text="分辨率、时长、步数和种子按当前视频档案单独保存。切换档案后，生成默认值换成该档案自己的记录。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </toolkit:SettingsCard>
+                            <Border x:Name="VideoSettingsRecordHost" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10,8">
+                                <StackPanel Spacing="4">
+                                    <TextBlock x:Name="VideoModelSettingsCardTitle" Text="此模型的设置记录" FontFamily="Microsoft YaHei UI" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="VideoModelSettingsCardSummary" AutomationProperties.AutomationId="VideoModelSettingsCardSummary" Text="分辨率、时长、步数和种子按当前视频档案单独保存。切换档案后，生成默认值换成该档案自己的记录。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <TextBlock x:Name="VideoModelOperationStatus" AutomationProperties.AutomationId="VideoModelOperationStatus" Style="{StaticResource SettingsSectionHintStyle}" />
+                            <toolkit:SettingsCard Header="模型目录">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="VideoImportButton" MinWidth="120" AutomationProperties.AutomationId="VideoImportButton" AutomationProperties.Name="选择本地视频模型目录" Content="选择本地目录" Click="VideoImportButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                    <Button x:Name="ReleaseVideoModelButton" MinWidth="120" AutomationProperties.AutomationId="ReleaseVideoModelButton" AutomationProperties.Name="释放视频模型" Content="释放模型" Click="ReleaseVideoModelButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
+                                </StackPanel>
+                            </toolkit:SettingsCard>
+
+                            <Expander x:Name="VideoProfileParametersExpander" AutomationProperties.AutomationId="VideoProfileParametersExpander" Header="模型档案参数（能力范围与工作流）" ExpandDirection="Down" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalAlignment="Top">
+                                <StackPanel Spacing="4" Margin="0,8,0,4">
+                                    <TextBlock Text="默认按档案推荐值填写。保存后提交时覆盖对应节点，不会改写磁盘上的工作流文件。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <toolkit:SettingsCard Header="显示名称">
+                                        <TextBox x:Name="VideoProfileDisplayNameBox" AutomationProperties.AutomationId="VideoProfileDisplayNameSetting" AutomationProperties.Name="显示名称" Style="{StaticResource CompactSettingsTextBoxStyle}" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="帧率">
+                                        <NumberBox x:Name="VideoProfileFpsBox" AutomationProperties.AutomationId="VideoProfileFpsSetting" AutomationProperties.Name="帧率" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="240" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="帧对齐倍数">
+                                        <NumberBox x:Name="VideoProfileAlignmentMultipleBox" AutomationProperties.AutomationId="VideoProfileAlignmentMultipleSetting" AutomationProperties.Name="帧对齐倍数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="10000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="帧对齐偏移">
+                                        <NumberBox x:Name="VideoProfileAlignmentOffsetBox" AutomationProperties.AutomationId="VideoProfileAlignmentOffsetSetting" AutomationProperties.Name="帧对齐偏移" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="9999" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="尺寸步进">
+                                        <NumberBox x:Name="VideoProfileDimensionStepBox" AutomationProperties.AutomationId="VideoProfileDimensionStepSetting" AutomationProperties.Name="尺寸步进" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最小边长">
+                                        <NumberBox x:Name="VideoProfileMinimumDimensionBox" AutomationProperties.AutomationId="VideoProfileMinimumDimensionSetting" AutomationProperties.Name="最小边长" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="64" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最大边长">
+                                        <NumberBox x:Name="VideoProfileMaximumDimensionBox" AutomationProperties.AutomationId="VideoProfileMaximumDimensionSetting" AutomationProperties.Name="最大边长" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="64" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最大像素数">
+                                        <NumberBox x:Name="VideoProfileMaximumPixelsBox" AutomationProperties.AutomationId="VideoProfileMaximumPixelsSetting" AutomationProperties.Name="最大像素数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="2147483647" SmallChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最短时长（秒）">
+                                        <NumberBox x:Name="VideoProfileMinimumDurationBox" AutomationProperties.AutomationId="VideoProfileMinimumDurationSetting" AutomationProperties.Name="最短时长（秒）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="300" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最长时长（秒）">
+                                        <NumberBox x:Name="VideoProfileMaximumDurationBox" AutomationProperties.AutomationId="VideoProfileMaximumDurationSetting" AutomationProperties.Name="最长时长（秒）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="300" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最少步数">
+                                        <NumberBox x:Name="VideoProfileMinimumStepsBox" AutomationProperties.AutomationId="VideoProfileMinimumStepsSetting" AutomationProperties.Name="最少步数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="1000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最多步数">
+                                        <NumberBox x:Name="VideoProfileMaximumStepsBox" AutomationProperties.AutomationId="VideoProfileMaximumStepsSetting" AutomationProperties.Name="最多步数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="1000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <TextBlock Text="媒体上限" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,12,0,2" />
+                                    <TextBlock Text="默认参考图 4 张、视频和音频各 1。某一类调到 0 只隐藏那一类。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <toolkit:SettingsCard Header="最大参考图张数">
+                                        <NumberBox x:Name="VideoProfileMaxReferenceImagesBox" AutomationProperties.AutomationId="VideoProfileMaxReferenceImagesSetting" AutomationProperties.Name="最大参考图张数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="9" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="参考图尺寸">
+                                        <ComboBox x:Name="VideoProfileRefImageSizeBox" AutomationProperties.AutomationId="VideoProfileRefImageSizeSetting" AutomationProperties.Name="参考图尺寸" MinWidth="180">
+                                            <ComboBoxItem Content="匹配生成分辨率" Tag="match" />
+                                            <ComboBoxItem Content="最大短边（更吃显存）" Tag="max" />
+                                        </ComboBox>
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最大参考视频数">
+                                        <NumberBox x:Name="VideoProfileMaxReferenceVideosBox" AutomationProperties.AutomationId="VideoProfileMaxReferenceVideosSetting" AutomationProperties.Name="最大参考视频数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="3" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="最大参考音频数">
+                                        <NumberBox x:Name="VideoProfileMaxReferenceAudiosBox" AutomationProperties.AutomationId="VideoProfileMaxReferenceAudiosSetting" AutomationProperties.Name="最大参考音频数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="3" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="文生视频">
+                                        <ToggleSwitch x:Name="VideoProfileTextToVideoToggle" AutomationProperties.AutomationId="VideoProfileTextToVideoSetting" AutomationProperties.Name="文生视频" OnContent="开启" OffContent="关闭" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="首帧图生视频">
+                                        <ToggleSwitch x:Name="VideoProfileFirstFrameToggle" AutomationProperties.AutomationId="VideoProfileFirstFrameSetting" AutomationProperties.Name="首帧图生视频" OnContent="开启" OffContent="关闭" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="首帧 + 尾帧 / 尾帧">
+                                        <ToggleSwitch x:Name="VideoProfileFirstLastFrameToggle" AutomationProperties.AutomationId="VideoProfileFirstLastFrameSetting" AutomationProperties.Name="首帧 + 尾帧 / 尾帧" OnContent="开启" OffContent="关闭" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="默认模式">
+                                        <ComboBox x:Name="VideoProfileDefaultModeBox" AutomationProperties.AutomationId="VideoProfileDefaultModeSetting" AutomationProperties.Name="默认模式" MinWidth="180">
+                                            <ComboBoxItem Content="文生视频" Tag="text" />
+                                            <ComboBoxItem Content="首帧图生视频" Tag="first_frame" />
+                                            <ComboBoxItem Content="首帧 + 尾帧" Tag="first_last_frame" />
+                                            <ComboBoxItem Content="尾帧图生视频" Tag="last_frame" />
+                                            <ComboBoxItem Content="参考图" Tag="single_reference_image" />
+                                            <ComboBoxItem Content="参考视频" Tag="reference_video" />
+                                            <ComboBoxItem Content="参考音频" Tag="reference_audio" />
+                                        </ComboBox>
+                                    </toolkit:SettingsCard>
+                                    <TextBlock Text="工作流参数" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,12,0,2" />
+                                    <TextBlock Text="这些值以前写死在工作流模板里。改完后下次提交会写到对应节点。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <toolkit:SettingsCard Header="CFG">
+                                        <NumberBox x:Name="VideoProfileCfgBox" AutomationProperties.AutomationId="VideoProfileCfgSetting" AutomationProperties.Name="CFG" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="100" SmallChange="0.1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="去噪">
+                                        <NumberBox x:Name="VideoProfileDenoiseBox" AutomationProperties.AutomationId="VideoProfileDenoiseSetting" AutomationProperties.Name="去噪" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="1" SmallChange="0.05" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="采样器">
+                                        <ComboBox x:Name="VideoProfileSamplerBox" AutomationProperties.AutomationId="VideoProfileSamplerSetting" AutomationProperties.Name="采样器" MinWidth="180">
+                                            <ComboBoxItem Content="euler" Tag="euler" />
+                                            <ComboBoxItem Content="euler_ancestral" Tag="euler_ancestral" />
+                                            <ComboBoxItem Content="dpmpp_2m" Tag="dpmpp_2m" />
+                                            <ComboBoxItem Content="dpmpp_2m_sde" Tag="dpmpp_2m_sde" />
+                                            <ComboBoxItem Content="dpmpp_sde" Tag="dpmpp_sde" />
+                                            <ComboBoxItem Content="uni_pc" Tag="uni_pc" />
+                                            <ComboBoxItem Content="ddim" Tag="ddim" />
+                                            <ComboBoxItem Content="lcm" Tag="lcm" />
+                                        </ComboBox>
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="调度器">
+                                        <ComboBox x:Name="VideoProfileSchedulerBox" AutomationProperties.AutomationId="VideoProfileSchedulerSetting" AutomationProperties.Name="调度器" MinWidth="180">
+                                            <ComboBoxItem Content="simple" Tag="simple" />
+                                            <ComboBoxItem Content="normal" Tag="normal" />
+                                            <ComboBoxItem Content="karras" Tag="karras" />
+                                            <ComboBoxItem Content="exponential" Tag="exponential" />
+                                            <ComboBoxItem Content="sgm_uniform" Tag="sgm_uniform" />
+                                            <ComboBoxItem Content="ddim_uniform" Tag="ddim_uniform" />
+                                            <ComboBoxItem Content="beta" Tag="beta" />
+                                        </ComboBox>
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="视频 shift">
+                                        <NumberBox x:Name="VideoProfileShiftVideoBox" AutomationProperties.AutomationId="VideoProfileShiftVideoSetting" AutomationProperties.Name="视频 shift" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0.01" Maximum="100" SmallChange="0.5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="音频 shift">
+                                        <NumberBox x:Name="VideoProfileShiftAudioBox" AutomationProperties.AutomationId="VideoProfileShiftAudioSetting" AutomationProperties.Name="音频 shift" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0.01" Maximum="100" SmallChange="0.5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard Header="负面提示词">
+                                        <TextBox x:Name="VideoProfileNegativePromptBox" AutomationProperties.AutomationId="VideoProfileNegativePromptSetting" AutomationProperties.Name="负面提示词" Style="{StaticResource CompactSettingsTextBoxStyle}" />
+                                    </toolkit:SettingsCard>
+                                </StackPanel>
+                            </Expander>
+
+                            <Expander x:Name="VideoPromptPhrasesExpander" AutomationProperties.AutomationId="VideoPromptPhrasesExpander" Header="提示词模板" ExpandDirection="Down" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalAlignment="Top">
+                                <StackPanel Spacing="8" Margin="0,8,0,4">
+                                    <TextBlock Text="生成页四个格子的名字。日常改提示词请在视频页填四格，或点「查看正文」。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                    <StackPanel x:Name="VideoPromptPrefixHost" Spacing="8" />
+                                    <Expander Header="高级套话（一般不用改）" ExpandDirection="Down" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                        <StackPanel Spacing="8" Margin="0,8,0,0">
+                                            <TextBlock Text="插入模板时的官方骨架句子。占位符：{id} {pic} {vid} {clauses}。留空则用默认。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                                            <StackPanel x:Name="VideoPromptPhraseHost" Spacing="8" />
                                         </StackPanel>
-                                    </Border>
-                                    <TextBlock x:Name="VideoModelOperationStatus" AutomationProperties.AutomationId="VideoModelOperationStatus" Style="{StaticResource SettingsSectionHintStyle}" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                        <Button x:Name="VideoImportButton" AutomationProperties.AutomationId="VideoImportButton" AutomationProperties.Name="选择本地视频模型目录" Content="选择本地目录" Click="VideoImportButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
-                                        <Button x:Name="ReleaseVideoModelButton" Grid.Column="1" AutomationProperties.AutomationId="ReleaseVideoModelButton" AutomationProperties.Name="释放视频模型" Content="释放模型" Click="ReleaseVideoModelButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
-                                    </Grid>
+                                    </Expander>
+                                    <Button x:Name="ResetVideoPromptPhrasesButton" AutomationProperties.AutomationId="ResetVideoPromptPhrasesButton" AutomationProperties.Name="恢复模板套话为官方默认" Content="恢复官方套话" MinWidth="120" HorizontalAlignment="Right" Click="ResetVideoPromptPhrasesButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
                                 </StackPanel>
-                            </Border>
-                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,8">
-                                <Expander x:Name="VideoProfileParametersExpander" AutomationProperties.AutomationId="VideoProfileParametersExpander" Header="模型档案参数（能力范围与工作流）" ExpandDirection="Down" HorizontalContentAlignment="Stretch" VerticalAlignment="Top">
-                                    <StackPanel Spacing="8" Margin="0,8,0,4">
-                                        <TextBlock Text="默认按档案推荐值填写；数字框可调到当前工作流允许的最大值。保存后提交时覆盖对应节点，不会改写磁盘上的工作流文件。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                        <TextBox x:Name="VideoProfileDisplayNameBox" AutomationProperties.AutomationId="VideoProfileDisplayNameSetting" Header="显示名称" Style="{StaticResource CompactSettingsTextBoxStyle}" />
-                                        <Grid ColumnSpacing="12" RowSpacing="10">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                            <NumberBox x:Name="VideoProfileFpsBox" AutomationProperties.AutomationId="VideoProfileFpsSetting" Header="帧率" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="240" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileAlignmentMultipleBox" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileAlignmentMultipleSetting" Header="帧对齐倍数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="10000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileAlignmentOffsetBox" Grid.Row="1" AutomationProperties.AutomationId="VideoProfileAlignmentOffsetSetting" Header="帧对齐偏移" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="9999" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileDimensionStepBox" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileDimensionStepSetting" Header="尺寸步进" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileMinimumDimensionBox" Grid.Row="2" AutomationProperties.AutomationId="VideoProfileMinimumDimensionSetting" Header="最小边长" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="64" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileMaximumDimensionBox" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileMaximumDimensionSetting" Header="最大边长" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="64" Maximum="4096" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileMaximumPixelsBox" Grid.Row="3" Grid.ColumnSpan="2" AutomationProperties.AutomationId="VideoProfileMaximumPixelsSetting" Header="最大像素数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="2147483647" SmallChange="1024" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileMinimumDurationBox" Grid.Row="4" AutomationProperties.AutomationId="VideoProfileMinimumDurationSetting" Header="最短时长（秒）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="300" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileMaximumDurationBox" Grid.Row="4" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileMaximumDurationSetting" Header="最长时长（秒）" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="300" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileMinimumStepsBox" Grid.Row="5" AutomationProperties.AutomationId="VideoProfileMinimumStepsSetting" Header="最少步数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="1000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileMaximumStepsBox" Grid.Row="5" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileMaximumStepsSetting" Header="最多步数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="1" Maximum="1000" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                        </Grid>
-                                        <TextBlock Text="媒体上限" Style="{StaticResource SettingsSectionTitleStyle}" Margin="0,8,0,0" />
-                                        <TextBlock Text="默认参考图 4 张、视频/音频各 1，可调到 9 / 3 / 3。参考模式可同时使用图、视频和音频。某一类调到 0 只隐藏那一类芯片。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                        <Grid ColumnSpacing="12" RowSpacing="10">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                            <NumberBox x:Name="VideoProfileMaxReferenceImagesBox" AutomationProperties.AutomationId="VideoProfileMaxReferenceImagesSetting" Header="最大参考图张数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="9" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <ComboBox x:Name="VideoProfileRefImageSizeBox" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileRefImageSizeSetting" Header="参考图尺寸" HorizontalAlignment="Stretch">
-                                                <ComboBoxItem Content="匹配生成分辨率" Tag="match" />
-                                                <ComboBoxItem Content="最大短边（更吃显存）" Tag="max" />
-                                            </ComboBox>
-                                            <NumberBox x:Name="VideoProfileMaxReferenceVideosBox" Grid.Row="1" AutomationProperties.AutomationId="VideoProfileMaxReferenceVideosSetting" Header="最大参考视频数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="3" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileMaxReferenceAudiosBox" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileMaxReferenceAudiosSetting" Header="最大参考音频数" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="3" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <ToggleSwitch x:Name="VideoProfileTextToVideoToggle" Grid.Row="2" AutomationProperties.AutomationId="VideoProfileTextToVideoSetting" Header="文生视频" OnContent="开启" OffContent="关闭" />
-                                            <ToggleSwitch x:Name="VideoProfileFirstFrameToggle" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileFirstFrameSetting" Header="首帧图生视频" OnContent="开启" OffContent="关闭" />
-                                            <ToggleSwitch x:Name="VideoProfileFirstLastFrameToggle" Grid.Row="3" AutomationProperties.AutomationId="VideoProfileFirstLastFrameSetting" Header="首帧 + 尾帧 / 尾帧" OnContent="开启" OffContent="关闭" />
-                                            <ComboBox x:Name="VideoProfileDefaultModeBox" Grid.Row="3" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileDefaultModeSetting" Header="默认模式" HorizontalAlignment="Stretch">
-                                                <ComboBoxItem Content="文生视频" Tag="text" />
-                                                <ComboBoxItem Content="首帧图生视频" Tag="first_frame" />
-                                                <ComboBoxItem Content="首帧 + 尾帧" Tag="first_last_frame" />
-                                                <ComboBoxItem Content="尾帧图生视频" Tag="last_frame" />
-                                                <ComboBoxItem Content="参考图" Tag="single_reference_image" />
-                                                <ComboBoxItem Content="参考视频" Tag="reference_video" />
-                                                <ComboBoxItem Content="参考音频" Tag="reference_audio" />
-                                            </ComboBox>
-                                        </Grid>
-                                        <TextBlock Text="工作流参数" Style="{StaticResource SettingsSectionTitleStyle}" Margin="0,8,0,0" />
-                                        <TextBlock Text="这些值以前写死在工作流模板里。改完后下次提交会写到对应节点。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                        <Grid ColumnSpacing="12" RowSpacing="10">
-                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                            <NumberBox x:Name="VideoProfileCfgBox" AutomationProperties.AutomationId="VideoProfileCfgSetting" Header="CFG" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="100" SmallChange="0.1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileDenoiseBox" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileDenoiseSetting" Header="去噪" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0" Maximum="1" SmallChange="0.05" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <ComboBox x:Name="VideoProfileSamplerBox" Grid.Row="1" AutomationProperties.AutomationId="VideoProfileSamplerSetting" Header="采样器" HorizontalAlignment="Stretch">
-                                                <ComboBoxItem Content="euler" Tag="euler" />
-                                                <ComboBoxItem Content="euler_ancestral" Tag="euler_ancestral" />
-                                                <ComboBoxItem Content="dpmpp_2m" Tag="dpmpp_2m" />
-                                                <ComboBoxItem Content="dpmpp_2m_sde" Tag="dpmpp_2m_sde" />
-                                                <ComboBoxItem Content="dpmpp_sde" Tag="dpmpp_sde" />
-                                                <ComboBoxItem Content="uni_pc" Tag="uni_pc" />
-                                                <ComboBoxItem Content="ddim" Tag="ddim" />
-                                                <ComboBoxItem Content="lcm" Tag="lcm" />
-                                            </ComboBox>
-                                            <ComboBox x:Name="VideoProfileSchedulerBox" Grid.Row="1" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileSchedulerSetting" Header="调度器" HorizontalAlignment="Stretch">
-                                                <ComboBoxItem Content="simple" Tag="simple" />
-                                                <ComboBoxItem Content="normal" Tag="normal" />
-                                                <ComboBoxItem Content="karras" Tag="karras" />
-                                                <ComboBoxItem Content="exponential" Tag="exponential" />
-                                                <ComboBoxItem Content="sgm_uniform" Tag="sgm_uniform" />
-                                                <ComboBoxItem Content="ddim_uniform" Tag="ddim_uniform" />
-                                                <ComboBoxItem Content="beta" Tag="beta" />
-                                            </ComboBox>
-                                            <NumberBox x:Name="VideoProfileShiftVideoBox" Grid.Row="2" AutomationProperties.AutomationId="VideoProfileShiftVideoSetting" Header="视频 shift" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0.01" Maximum="100" SmallChange="0.5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <NumberBox x:Name="VideoProfileShiftAudioBox" Grid.Row="2" Grid.Column="1" AutomationProperties.AutomationId="VideoProfileShiftAudioSetting" Header="音频 shift" Style="{StaticResource CompactSettingsNumberBoxStyle}" Minimum="0.01" Maximum="100" SmallChange="0.5" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                            <TextBox x:Name="VideoProfileNegativePromptBox" Grid.Row="3" Grid.ColumnSpan="2" AutomationProperties.AutomationId="VideoProfileNegativePromptSetting" Header="负面提示词" Style="{StaticResource CompactSettingsTextBoxStyle}" />
-                                        </Grid>
-                                    </StackPanel>
-                                </Expander>
-                            </Border>
-                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,8">
-                                <Expander x:Name="VideoPromptPhrasesExpander" AutomationProperties.AutomationId="VideoPromptPhrasesExpander" Header="提示词模板" ExpandDirection="Down" HorizontalContentAlignment="Stretch" VerticalAlignment="Top">
-                                    <StackPanel Spacing="8" Margin="0,8,0,4">
-                                        <TextBlock Text="生成页四个格子的名字。日常改提示词请在视频页填四格，或点「查看正文」。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                        <StackPanel x:Name="VideoPromptPrefixHost" Spacing="8" />
-                                        <Expander Header="高级套话（一般不用改）" ExpandDirection="Down" HorizontalContentAlignment="Stretch">
-                                            <StackPanel Spacing="8" Margin="0,8,0,0">
-                                                <TextBlock Text="插入模板时的官方骨架句子。占位符：{id} {pic} {vid} {clauses}。留空则用默认。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                                <StackPanel x:Name="VideoPromptPhraseHost" Spacing="8" />
-                                            </StackPanel>
-                                        </Expander>
-                                        <Button x:Name="ResetVideoPromptPhrasesButton" AutomationProperties.AutomationId="ResetVideoPromptPhrasesButton" AutomationProperties.Name="恢复模板套话为官方默认" Content="恢复官方套话" HorizontalAlignment="Right" Click="ResetVideoPromptPhrasesButton_Click" Style="{StaticResource SecondaryButtonStyle}" />
-                                    </StackPanel>
-                                </Expander>
-                            </Border>
-                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                            <StackPanel Spacing="8">
-                                <StackPanel Spacing="2">
-                                    <TextBlock Text="生成默认值" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                    <TextBlock x:Name="VideoCapabilityHint" Text="保存后用于下一次视频生成；具体范围由当前模型档案决定。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                </StackPanel>
-                                <Grid ColumnSpacing="12" RowSpacing="10">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                    <NumberBox x:Name="VideoWidthBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoWidthSetting" Header="宽度" Minimum="256" Maximum="1024" SmallChange="32" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <NumberBox x:Name="VideoHeightBox" Grid.Column="1" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoHeightSetting" Header="高度" Minimum="256" Maximum="1024" SmallChange="32" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <NumberBox x:Name="VideoDurationBox" Grid.Row="1" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoDurationSetting" Header="时长（秒）" Minimum="5" Maximum="15" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <NumberBox x:Name="VideoStepsBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoStepsSetting" Header="步数" Minimum="10" Maximum="30" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <NumberBox x:Name="VideoSeedBox" Grid.Row="2" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoSeedSetting" Header="固定种子" Minimum="0" Maximum="2147483647" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
-                                    <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4" VerticalAlignment="Center">
-                                        <ToggleSwitch x:Name="VideoRandomSeedToggle" AutomationProperties.AutomationId="VideoRandomSeedSetting" Header="随机种子" OnContent="开启" OffContent="关闭" />
-                                        <TextBlock Text="尺寸、时长、步数和帧率限制由当前模型档案提供。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <ComboBox x:Name="VideoOutputFormatBox" Grid.Row="3" AutomationProperties.AutomationId="VideoOutputFormatSetting" Header="输出格式" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="MP4" Tag="mp4" />
-                                        <ComboBoxItem Content="自动" Tag="auto" />
-                                    </ComboBox>
-                                    <ComboBox x:Name="VideoCodecBox" Grid.Row="3" Grid.Column="1" AutomationProperties.AutomationId="VideoCodecSetting" Header="视频编码" HorizontalAlignment="Stretch">
-                                        <ComboBoxItem Content="自动" Tag="auto" />
-                                        <ComboBoxItem Content="H.264" Tag="h264" />
-                                    </ComboBox>
-                                </Grid>
-                            </StackPanel>
-                            </Border>
+                            </Expander>
+
+                            <TextBlock Text="生成默认值" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <TextBlock x:Name="VideoCapabilityHint" Text="保存后用于下一次视频生成；具体范围由当前模型档案决定。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+                            <toolkit:SettingsCard Header="宽度">
+                                <NumberBox x:Name="VideoWidthBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoWidthSetting" AutomationProperties.Name="宽度" Minimum="256" Maximum="1024" SmallChange="32" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="高度">
+                                <NumberBox x:Name="VideoHeightBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoHeightSetting" AutomationProperties.Name="高度" Minimum="256" Maximum="1024" SmallChange="32" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="时长（秒）">
+                                <NumberBox x:Name="VideoDurationBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoDurationSetting" AutomationProperties.Name="时长（秒）" Minimum="5" Maximum="15" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="步数">
+                                <NumberBox x:Name="VideoStepsBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoStepsSetting" AutomationProperties.Name="步数" Minimum="10" Maximum="30" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="固定种子">
+                                <NumberBox x:Name="VideoSeedBox" Style="{StaticResource CompactSettingsNumberBoxStyle}" AutomationProperties.AutomationId="VideoSeedSetting" AutomationProperties.Name="固定种子" Minimum="0" Maximum="2147483647" SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="随机种子" Description="尺寸、时长、步数和帧率限制由当前模型档案提供。">
+                                <ToggleSwitch x:Name="VideoRandomSeedToggle" AutomationProperties.AutomationId="VideoRandomSeedSetting" AutomationProperties.Name="随机种子" OnContent="开启" OffContent="关闭" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="输出格式">
+                                <ComboBox x:Name="VideoOutputFormatBox" AutomationProperties.AutomationId="VideoOutputFormatSetting" AutomationProperties.Name="输出格式" MinWidth="140">
+                                    <ComboBoxItem Content="MP4" Tag="mp4" />
+                                    <ComboBoxItem Content="自动" Tag="auto" />
+                                </ComboBox>
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="视频编码">
+                                <ComboBox x:Name="VideoCodecBox" AutomationProperties.AutomationId="VideoCodecSetting" AutomationProperties.Name="视频编码" MinWidth="140">
+                                    <ComboBoxItem Content="自动" Tag="auto" />
+                                    <ComboBoxItem Content="H.264" Tag="h264" />
+                                </ComboBox>
+                            </toolkit:SettingsCard>
                         </StackPanel>
-                        <StackPanel x:Name="HanhuaSettingsSection" Visibility="Collapsed" Spacing="12">
-                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,12">
-                                <StackPanel Spacing="8">
-                                    <StackPanel Spacing="2">
-                                        <TextBlock Text="汉化路径" Style="{StaticResource SettingsSectionTitleStyle}" />
-                                        <TextBlock Text="即时。用浏览选择目录和文件。本机填字用档案和 GGUF；云端用下面的 JSON。密钥留在该文件里，不要填到这里。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <Border Height="1" Background="{StaticResource BorderBrush}" Opacity="0.7" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox x:Name="HanhuaPackRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPackRootSetting" Header="汉化工具包根目录" PlaceholderText="选择内嵌汉化工具包目录" TextWrapping="Wrap" />
-                                        <Button Grid.Column="1" x:Name="HanhuaPackRootPickButton" AutomationProperties.AutomationId="HanhuaPackRootPickButton" AutomationProperties.Name="浏览汉化工具包目录" Content="浏览" Click="HanhuaPackRootPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
-                                    </Grid>
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox x:Name="HanhuaPythonExeBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPythonExeSetting" Header="Python 可执行文件" PlaceholderText="选择 python.exe" TextWrapping="Wrap" />
-                                        <Button Grid.Column="1" x:Name="HanhuaPythonExePickButton" AutomationProperties.AutomationId="HanhuaPythonExePickButton" AutomationProperties.Name="浏览 Python 可执行文件" Content="浏览" Click="HanhuaPythonExePickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
-                                    </Grid>
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox x:Name="HanhuaMitRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaMitRootSetting" Header="manga-image-translator 根目录" PlaceholderText="选择 MIT 目录" TextWrapping="Wrap" />
-                                        <Button Grid.Column="1" x:Name="HanhuaMitRootPickButton" AutomationProperties.AutomationId="HanhuaMitRootPickButton" AutomationProperties.Name="浏览 MIT 目录" Content="浏览" Click="HanhuaMitRootPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
-                                    </Grid>
-                                    <ComboBox
-                                        x:Name="HanhuaFillProfileBox"
-                                        AutomationProperties.AutomationId="HanhuaFillProfileSetting"
-                                        AutomationProperties.Name="汉化填字模型"
-                                        Header="填字模型档案"
-                                        HorizontalAlignment="Stretch"
-                                        DisplayMemberPath="DisplayName"
-                                        SelectionChanged="HanhuaFillProfileBox_SelectionChanged" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox x:Name="HanhuaFillModelPathBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaFillModelPathSetting" Header="填字模型文件" PlaceholderText="选择填字 GGUF" TextWrapping="Wrap" />
-                                        <Button Grid.Column="1" x:Name="HanhuaFillModelPickButton" AutomationProperties.AutomationId="HanhuaFillModelPickButton" AutomationProperties.Name="浏览填字模型文件" Content="浏览" Click="HanhuaFillModelPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
-                                    </Grid>
-                                    <TextBlock Text="填字档案和 GGUF 路径都可以改，不影响聊天默认档案。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox x:Name="HanhuaCloudConfigBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaCloudConfigSetting" Header="云端配置文件" PlaceholderText="选择含 baseUrl / model 的 JSON" TextWrapping="Wrap" />
-                                        <Button Grid.Column="1" x:Name="HanhuaCloudConfigPickButton" AutomationProperties.AutomationId="HanhuaCloudConfigPickButton" AutomationProperties.Name="浏览云端配置文件" Content="浏览" Click="HanhuaCloudConfigPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Bottom" />
-                                    </Grid>
-                                    <TextBlock Text="云端引擎只用这份配置。换线路就换文件，不必改代码。" Style="{StaticResource SettingsSectionHintStyle}" TextWrapping="Wrap" />
+
+                        <StackPanel x:Name="HanhuaSettingsSection" Visibility="Collapsed" Spacing="4">
+                            <TextBlock Text="汉化路径" Style="{StaticResource SettingsSectionTitleStyle}" Margin="1,22,0,2" />
+                            <TextBlock Text="即时。密钥留在云端 JSON 里，不要填到这里。" Style="{StaticResource SettingsSectionHintStyle}" Margin="1,0,0,2" TextWrapping="Wrap" />
+                            <toolkit:SettingsCard Header="汉化工具包根目录">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="HanhuaPackRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPackRootSetting" AutomationProperties.Name="汉化工具包根目录" PlaceholderText="选择内嵌汉化工具包目录" TextWrapping="Wrap" />
+                                    <Button x:Name="HanhuaPackRootPickButton" MinWidth="96" AutomationProperties.AutomationId="HanhuaPackRootPickButton" AutomationProperties.Name="浏览汉化工具包目录" Content="浏览" Click="HanhuaPackRootPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Center" />
                                 </StackPanel>
-                            </Border>
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="Python 可执行文件">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="HanhuaPythonExeBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaPythonExeSetting" AutomationProperties.Name="Python 可执行文件" PlaceholderText="选择 python.exe" TextWrapping="Wrap" />
+                                    <Button x:Name="HanhuaPythonExePickButton" MinWidth="96" AutomationProperties.AutomationId="HanhuaPythonExePickButton" AutomationProperties.Name="浏览 Python 可执行文件" Content="浏览" Click="HanhuaPythonExePickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="manga-image-translator 根目录">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="HanhuaMitRootBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaMitRootSetting" AutomationProperties.Name="manga-image-translator 根目录" PlaceholderText="选择 MIT 目录" TextWrapping="Wrap" />
+                                    <Button x:Name="HanhuaMitRootPickButton" MinWidth="96" AutomationProperties.AutomationId="HanhuaMitRootPickButton" AutomationProperties.Name="浏览 MIT 目录" Content="浏览" Click="HanhuaMitRootPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="填字模型档案" Description="改档案和 GGUF 不影响聊天默认档案。">
+                                <ComboBox x:Name="HanhuaFillProfileBox" AutomationProperties.AutomationId="HanhuaFillProfileSetting" AutomationProperties.Name="汉化填字模型" MinWidth="220" DisplayMemberPath="DisplayName" SelectionChanged="HanhuaFillProfileBox_SelectionChanged" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="填字模型文件">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="HanhuaFillModelPathBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaFillModelPathSetting" AutomationProperties.Name="填字模型文件" PlaceholderText="选择填字 GGUF" TextWrapping="Wrap" />
+                                    <Button x:Name="HanhuaFillModelPickButton" MinWidth="96" AutomationProperties.AutomationId="HanhuaFillModelPickButton" AutomationProperties.Name="浏览填字模型文件" Content="浏览" Click="HanhuaFillModelPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="云端配置文件" Description="换线路就换文件。">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="HanhuaCloudConfigBox" Style="{StaticResource CompactSettingsTextBoxStyle}" AutomationProperties.AutomationId="HanhuaCloudConfigSetting" AutomationProperties.Name="云端配置文件" PlaceholderText="选择含 baseUrl / model 的 JSON" TextWrapping="Wrap" />
+                                    <Button x:Name="HanhuaCloudConfigPickButton" MinWidth="96" AutomationProperties.AutomationId="HanhuaCloudConfigPickButton" AutomationProperties.Name="浏览云端配置文件" Content="浏览" Click="HanhuaCloudConfigPickButton_Click" Style="{StaticResource ToolbarButtonStyle}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </toolkit:SettingsCard>
                         </StackPanel>
 
                         <InfoBar x:Name="ValidationInfo" AutomationProperties.AutomationId="SettingsValidationInfo" IsOpen="False" IsClosable="False" Severity="Error" />
+
+                        <Grid MinHeight="44">
+                            <Grid x:Name="FooterActionsBar">
+                                <toolkit:SettingsCard Header="写入设置" Description="恢复默认值只重填表单，要再点保存才写入。">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button MinWidth="120" AutomationProperties.AutomationId="ResetSettingsButton" AutomationProperties.Name="恢复默认值" Content="恢复默认值" Click="ResetButton_Click" Style="{StaticResource SecondaryButtonStyle}" ToolTipService.ToolTip="仅重填表单默认值，需再点保存才会写入" />
+                                        <Button MinWidth="120" AutomationProperties.AutomationId="SaveSettingsButton" AutomationProperties.Name="保存设置" Content="保存" Click="SaveButton_Click" Style="{StaticResource PrimaryButtonStyle}" />
+                                    </StackPanel>
+                                </toolkit:SettingsCard>
+                            </Grid>
+                            <Border x:Name="DiscardConfirmBar" AutomationProperties.AutomationId="SettingsDiscardConfirmBar" Height="0" Opacity="0" IsHitTestVisible="False" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="10">
+                                <Grid ColumnSpacing="8" Margin="12,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="有未保存的修改，关闭将丢弃本次改动。" FontFamily="Microsoft YaHei UI" FontSize="13" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}" />
+                                    <Button x:Name="KeepEditingButton" Grid.Column="1" AutomationProperties.AutomationId="KeepEditingSettingsButton" AutomationProperties.Name="继续编辑设置" Content="继续编辑" Click="KeepEditingButton_Click" Style="{StaticResource SecondaryButtonStyle}" MinWidth="96" IsEnabled="False" />
+                                    <Button x:Name="DiscardAndCloseButton" Grid.Column="2" AutomationProperties.AutomationId="DiscardSettingsButton" AutomationProperties.Name="放弃并关闭设置" Content="放弃并关闭" Click="DiscardAndCloseButton_Click" Style="{StaticResource SecondaryButtonStyle}" MinWidth="112" IsEnabled="False" />
+                                </Grid>
+                            </Border>
+                        </Grid>
                     </StackPanel>
                 </ScrollViewer>
-
-                <!-- Footer actions and discard confirm share one row so a hidden confirm bar cannot reserve blank space. -->
-                <Grid Grid.Row="2" MinHeight="44">
-                    <Grid x:Name="FooterActionsBar" ColumnSpacing="8">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" HorizontalAlignment="Left" AutomationProperties.AutomationId="ResetSettingsButton" AutomationProperties.Name="恢复默认值" Content="恢复默认值" Click="ResetButton_Click" Style="{StaticResource SecondaryButtonStyle}" ToolTipService.ToolTip="仅重填表单默认值，需再点保存才会写入" />
-                        <Button Grid.Column="1" AutomationProperties.AutomationId="SaveSettingsButton" AutomationProperties.Name="保存设置" Content="保存" Click="SaveButton_Click" Style="{StaticResource PrimaryButtonStyle}" />
-                    </Grid>
-                    <Border x:Name="DiscardConfirmBar" AutomationProperties.AutomationId="SettingsDiscardConfirmBar" Height="0" Opacity="0" IsHitTestVisible="False" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource StrongBorderBrush}" BorderThickness="1" CornerRadius="10">
-                        <Grid ColumnSpacing="8" Margin="12,6">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="有未保存的修改，关闭将丢弃本次改动。" FontFamily="Microsoft YaHei UI" FontSize="13" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}" />
-                            <Button x:Name="KeepEditingButton" Grid.Column="1" AutomationProperties.AutomationId="KeepEditingSettingsButton" AutomationProperties.Name="继续编辑设置" Content="继续编辑" Click="KeepEditingButton_Click" Style="{StaticResource SecondaryButtonStyle}" MinWidth="96" IsEnabled="False" />
-                            <Button x:Name="DiscardAndCloseButton" Grid.Column="2" AutomationProperties.AutomationId="DiscardSettingsButton" AutomationProperties.Name="放弃并关闭设置" Content="放弃并关闭" Click="DiscardAndCloseButton_Click" Style="{StaticResource SecondaryButtonStyle}" MinWidth="112" IsEnabled="False" />
-                        </Grid>
-                    </Border>
-                </Grid>
-            </Grid>
             </Grid>
         </Border>
     </Grid>

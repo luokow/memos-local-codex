@@ -45,10 +45,15 @@ Invoke-WinAppJson -Arguments @(
     'ui', 'wait-for', 'CloseSettingsButton', '-w', $hwnd,
     '--property', 'IsEnabled', '--value', 'True', '--timeout', '5000', '--json'
 ) | Out-Null
-# The icon sits on the left page. With the drawer open, the mouse click lands on the scrim.
+# The icon is on the settings page once it fills the window. That click must not close it.
 Invoke-WinAppJson -Arguments @('ui', 'click', 'AppIconMark', '-w', $hwnd, '--json') | Out-Null
+Invoke-WinAppJson -Arguments @(
+    'ui', 'wait-for', 'CloseSettingsButton', '-w', $hwnd,
+    '--property', 'IsEnabled', '--value', 'True', '--timeout', '2000', '--json'
+) | Out-Null
+Invoke-WinAppJson -Arguments @('ui', 'invoke', 'CloseSettingsButton', '-w', $hwnd, '--json') | Out-Null
 Invoke-WinAppJson -Arguments @(
     'ui', 'wait-for', 'CloseSettingsButton', '-w', $hwnd,
     '--property', 'IsEnabled', '--value', 'False', '--timeout', '4000', '--json'
 ) | Out-Null
-Write-Output 'PASS settings-scrim-click-closes-drawer'
+Write-Output 'PASS settings-page-blank-click-stays-open'

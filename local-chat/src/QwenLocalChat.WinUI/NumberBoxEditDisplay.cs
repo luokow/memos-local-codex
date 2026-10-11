@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -6,10 +7,13 @@ namespace QwenLocalChat_WinUI;
 
 /// <summary>
 /// NumberBox inline spinners plus the inner TextBox delete glyph leave about one
-/// digit of viewport, so editing 50 shows only 0. Hide that glyph and keep text in view.
+/// digit of viewport, so editing 18135 shows only 35. Hide that glyph and keep the
+/// leading digits in view. LayoutUpdated's sender is always null, so the box is captured.
 /// </summary>
 internal static class NumberBoxEditDisplay
 {
+    private static readonly ConditionalWeakTable<NumberBox, EventHandler<object>> LayoutHooks = new();
+
     public static void AttachTree(DependencyObject root)
     {
         foreach (var box in EnumerateDescendants<NumberBox>(root))
@@ -24,8 +28,12 @@ internal static class NumberBoxEditDisplay
         box.GotFocus += Box_GotFocus;
         box.ValueChanged -= Box_ValueChanged;
         box.ValueChanged += Box_ValueChanged;
-        box.LayoutUpdated -= Box_LayoutUpdated;
-        box.LayoutUpdated += Box_LayoutUpdated;
+        if (!LayoutHooks.TryGetValue(box, out var hook))
+        {
+            hook = (_, _) => Apply(box);
+            LayoutHooks.Add(box, hook);
+            box.LayoutUpdated += hook;
+        }
         if (box.IsLoaded)
             Apply(box);
     }
@@ -37,17 +45,16 @@ internal static class NumberBoxEditDisplay
 
     private static void Box_GotFocus(object sender, RoutedEventArgs e)
     {
-        if (sender is NumberBox box) Apply(box);
+        if (sender is not NumberBox box) return;
+        Apply(box);
+        // The delete-button visual state runs after focus and covers the number again.
+        box.DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => Apply(box));
     }
 
     private static void Box_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
         => Apply(sender);
-
-    private static void Box_LayoutUpdated(object? sender, object e)
-    {
-        if (sender is NumberBox box)
-            HideInnerDeleteButtons(box);
-    }
 
     private static void Apply(NumberBox box)
     {
@@ -58,6 +65,7 @@ internal static class NumberBoxEditDisplay
         input.TextChanged += Input_TextChanged;
         input.TextAlignment = TextAlignment.Left;
         HideInnerDeleteButtons(box);
+        input.UpdateLayout();
         KeepTextInView(input);
     }
 
@@ -88,12 +96,11 @@ internal static class NumberBoxEditDisplay
     private static void KeepTextInView(TextBox input)
     {
         var viewer = FindDescendant<ScrollViewer>(input);
-        if (viewer is null || viewer.HorizontalOffset <= 0) return;
+        if (viewer is null || viewer.HorizontalOffset <= 0.5) return;
         var text = input.Text ?? "";
-        if (text.Length == 0) return;
-        var estimated = text.Length * input.FontSize * 0.7 + input.Padding.Left + input.Padding.Right;
-        if (estimated <= viewer.ViewportWidth + 2)
-            viewer.ChangeView(0, null, null, disableAnimation: true);
+        // Settings values fit once the delete glyph is gone. Longer text keeps the caret.
+        if (text.Length == 0 || text.Length > 12) return;
+        viewer.ChangeView(0, null, null, disableAnimation: true);
     }
 
     private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject

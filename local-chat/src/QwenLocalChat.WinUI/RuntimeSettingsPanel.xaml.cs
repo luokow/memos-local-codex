@@ -1,10 +1,9 @@
-using System.Numerics;
+using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
-using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using QwenLocalChat.Core;
 using Windows.Globalization.NumberFormatting;
@@ -26,7 +25,6 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     private const double TemperatureStep = 0.1;
     private const double PenaltyStep = 0.05;
     private const double RepeatPenaltyStep = 0.01;
-    private const float ClosedSlideX = 520f;
     private LocalChatSettings _original = LocalChatSettings.SafeDefaults;
     private ModelProfileCatalog? _textProfiles;
     private VideoModelProfileCatalog? _videoProfiles;
@@ -37,7 +35,6 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     private bool _populatingProfiles;
     private bool _isClosing;
     private bool _compositionReady;
-    private CompositionScopedBatch? _closeBatch;
     private readonly Dictionary<string, TextBox> _phraseBoxes = new(StringComparer.Ordinal);
 
     public RuntimeSettingsPanel()
@@ -52,6 +49,16 @@ public sealed partial class RuntimeSettingsPanel : UserControl
             AttachNumberBoxEditDisplay();
         };
         VideoProfileParametersExpander.Expanding += (_, _) => AttachNumberBoxEditDisplay();
+        GenerationSettingsExpander.RegisterPropertyChangedCallback(
+            SettingsExpander.IsExpandedProperty,
+            (_, _) =>
+            {
+                if (!GenerationSettingsExpander.IsExpanded) return;
+                AttachNumberBoxEditDisplay();
+                DispatcherQueue.TryEnqueue(
+                    Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    AttachNumberBoxEditDisplay);
+            });
         EnsurePhraseEditors();
     }
 
@@ -72,7 +79,6 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         string section = SettingsSectionKind.Text)
     {
         _isClosing = false;
-        DetachCloseBatch();
         _textProfiles = textProfiles;
         _videoProfiles = videoProfiles;
         _textCards = ModelSettingsCards.EnsureText(settings, textProfiles);
@@ -107,26 +113,16 @@ public sealed partial class RuntimeSettingsPanel : UserControl
     public void Close()
     {
         if (_isClosing) return;
-
-        if (Opacity <= 0.01)
-        {
-            ApplyClosedVisualState(raiseClosed: true);
-            return;
-        }
-
         _isClosing = true;
-        // Block hits only. Never IsEnabled=false during motion (restyles the whole form).
-        IsHitTestVisible = false;
-        PlayCloseAnimation();
+        ApplyClosedVisualState(raiseClosed: true);
     }
 
     private void EnsureCompositionReady()
     {
         if (_compositionReady) return;
-        // Independent compositor translation — avoids XAML Storyboard/RenderTransform jank.
-        ElementCompositionPreview.SetIsTranslationEnabled(PanelShell, true);
+        // Compositor opacity only. A XAML opacity storyboard on this full page restyles the form.
         var visual = ElementCompositionPreview.GetElementVisual(PanelShell);
-        visual.Properties.InsertVector3("Translation", new Vector3(ClosedSlideX, 0, 0));
+        visual.Opacity = 0;
         _compositionReady = true;
     }
 
@@ -134,20 +130,16 @@ public sealed partial class RuntimeSettingsPanel : UserControl
 
     private void ApplyClosedVisualState(bool raiseClosed)
     {
-        DetachCloseBatch();
         _isClosing = false;
         HideDiscardConfirm();
         IsEnabled = false;
         IsHitTestVisible = false;
         Opacity = 0;
-        Scrim.Opacity = 0;
-        Scrim.IsHitTestVisible = false;
-        ShadowStrip.Opacity = 0;
         if (_compositionReady)
         {
             var visual = PanelVisual;
-            visual.StopAnimation("Translation");
-            visual.Properties.InsertVector3("Translation", new Vector3(ClosedSlideX, 0, 0));
+            visual.StopAnimation("Opacity");
+            visual.Opacity = 0;
         }
 
         if (raiseClosed)
@@ -156,69 +148,16 @@ public sealed partial class RuntimeSettingsPanel : UserControl
 
     private void PlayOpenAnimation()
     {
-        DetachCloseBatch();
         var visual = PanelVisual;
-        visual.StopAnimation("Translation");
-
-        // Scrim/shadow snap on — no concurrent full-screen opacity storyboard.
-        Scrim.Opacity = 1;
-        Scrim.IsHitTestVisible = true;
-        ShadowStrip.Opacity = 1;
-        visual.Properties.InsertVector3("Translation", new Vector3(ClosedSlideX, 0, 0));
+        visual.StopAnimation("Opacity");
+        visual.Opacity = 0;
 
         var compositor = visual.Compositor;
-        var slide = compositor.CreateVector3KeyFrameAnimation();
-        slide.InsertKeyFrame(1f, Vector3.Zero);
-        slide.Duration = TimeSpan.FromMilliseconds(180);
-        slide.StopBehavior = AnimationStopBehavior.SetToFinalValue;
-        visual.StartAnimation("Translation", slide);
-    }
-
-    private void PlayCloseAnimation()
-    {
-        DetachCloseBatch();
-        EnsureCompositionReady();
-        var visual = PanelVisual;
-        visual.StopAnimation("Translation");
-
-        // Drop cheap overlays immediately so only the drawer slides on the compositor.
-        Scrim.Opacity = 0;
-        Scrim.IsHitTestVisible = false;
-        ShadowStrip.Opacity = 0;
-        Opacity = 1;
-        PanelShell.Opacity = 1;
-
-        var compositor = visual.Compositor;
-        _closeBatch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
-        _closeBatch.Completed += CloseBatch_Completed;
-
-        var slide = compositor.CreateVector3KeyFrameAnimation();
-        slide.InsertKeyFrame(1f, new Vector3(ClosedSlideX, 0, 0));
-        slide.Duration = TimeSpan.FromMilliseconds(150);
-        slide.StopBehavior = AnimationStopBehavior.SetToFinalValue;
-        visual.StartAnimation("Translation", slide);
-        _closeBatch.End();
-    }
-
-    private void CloseBatch_Completed(object sender, CompositionBatchCompletedEventArgs args)
-    {
-        DetachCloseBatch();
-        // Composition callbacks are not guaranteed on the UI thread.
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (!_isClosing) return;
-            ApplyClosedVisualState(raiseClosed: true);
-        });
-    }
-
-    private void DetachCloseBatch()
-    {
-        if (_closeBatch is null) return;
-        _closeBatch.Completed -= CloseBatch_Completed;
-        try { _closeBatch.Dispose(); } catch { /* already ended */ }
-        _closeBatch = null;
-        if (_compositionReady)
-            PanelVisual.StopAnimation("Translation");
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(1f, 1f);
+        fade.Duration = TimeSpan.FromMilliseconds(180);
+        fade.StopBehavior = AnimationStopBehavior.SetToFinalValue;
+        visual.StartAnimation("Opacity", fade);
     }
 
     private void ConfigureTemperatureBox()
@@ -260,6 +199,10 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         if (VideoProfileParametersExpander is not null)
             VideoProfileParametersExpander.IsExpanded = kind == SettingsSectionKind.Video;
         ResetSettingsScroll();
+        // Collapsed sections are not in the tree at startup, so their number boxes
+        // never received the edit-display hook until the section is shown.
+        AttachNumberBoxEditDisplay();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, AttachNumberBoxEditDisplay);
     }
 
     private void ResetSettingsScroll()
@@ -670,10 +613,10 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         ChatAttachMaxFilesBox.Value = attachments.MaxFiles;
         ChatAttachMaxKbBox.Value = Math.Max(4, attachments.MaxBytesPerFile / 1024);
         ChatAttachExtraExtensionsBox.Text = attachments.ExtraExtensions ?? "";
-        ReasoningToggle.Visibility = support.Reasoning ? Visibility.Visible : Visibility.Collapsed;
-        ChatAttachImageToggle.Visibility = support.ImageAttachments ? Visibility.Visible : Visibility.Collapsed;
-        ChatAttachAudioToggle.Visibility = support.AudioAttachments ? Visibility.Visible : Visibility.Collapsed;
-        ChatAttachVideoToggle.Visibility = support.VideoAttachments ? Visibility.Visible : Visibility.Collapsed;
+        SetSettingsRowVisible(ReasoningToggle, support.Reasoning);
+        SetSettingsRowVisible(ChatAttachImageToggle, support.ImageAttachments);
+        SetSettingsRowVisible(ChatAttachAudioToggle, support.AudioAttachments);
+        SetSettingsRowVisible(ChatAttachVideoToggle, support.VideoAttachments);
         if (SelectedTextProfile is { } profile)
             WriteTextCardSummary(profile, support);
     }
@@ -691,6 +634,31 @@ public sealed partial class RuntimeSettingsPanel : UserControl
         limits.Add($"上下文 {normalized.ContextMinimum}–{normalized.ContextMaximum}。");
         TextModelSettingsCardTitle.Text = $"{profile.DisplayName} 的设置记录";
         TextModelSettingsCardSummary.Text = string.Join(string.Empty, limits);
+    }
+
+    private static void SetSettingsRowVisible(FrameworkElement control, bool visible)
+    {
+        var row = FindSettingsCard(control) ?? control;
+        row.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (!ReferenceEquals(row, control))
+            control.Visibility = Visibility.Visible;
+    }
+
+    private static FrameworkElement? FindSettingsCard(FrameworkElement start)
+    {
+        DependencyObject? current = start;
+        while (current is not null)
+        {
+            if (current is SettingsCard card)
+                return card;
+            var next = current is FrameworkElement element ? element.Parent : null;
+            next ??= VisualTreeHelper.GetParent(current);
+            if (ReferenceEquals(next, current))
+                return null;
+            current = next;
+        }
+
+        return null;
     }
 
     private TextModelSettingsCard ReadTextCard(TextModelSettingSupport support)
@@ -1108,12 +1076,6 @@ public sealed partial class RuntimeSettingsPanel : UserControl
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
         => RequestClose();
-
-    private void Scrim_Tapped(object sender, TappedRoutedEventArgs e)
-    {
-        e.Handled = true;
-        RequestClose();
-    }
 
     private void RequestClose()
     {

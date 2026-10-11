@@ -37,8 +37,8 @@
     },
     {
       "id": "settings-drawer",
-      "intended_change": "选择并导入文本或视频模型档案以及默认启动策略；每次打开或切换设置分区时回到内容顶部，视频分区直接展示可编辑的档案参数入口",
-      "preserve": ["文本和视频设置同构", "右侧抽屉宽度", "数字框不横向拉伸", "模型启动按钮位于主页面", "设置内容在抽屉内滚动而不改变主页面布局"],
+      "intended_change": "设置页按 WinUI Gallery：页眉和内容列最大宽 1064 并拉满到该宽度，文本视频汉化同一列宽。每一项是 SettingsCard（标题在左，控件保持自己的宽度在右），少用的生成项进 SettingsExpander。点进数字框时前面的数字保持可见。恢复默认值和保存在滚动内容末尾。选择并导入文本或视频模型档案以及默认启动策略；每次打开或切换设置分区时回到内容顶部，视频分区直接展示可编辑的档案参数入口。关闭只走关闭按钮。",
+      "preserve": ["文本和视频设置同构", "数字框不横向拉伸", "下拉不横向拉满", "模型启动按钮位于主页面", "点页面空白不关闭设置", "恢复默认值和保存在滚动内容里", "没有 720 居中槽"],
       "change_kinds": ["visual", "functional", "temporal"]
     },
     {
@@ -95,7 +95,8 @@
     {"claim": "聊天和视频在相同窗口尺寸下对齐且无裁切", "kind": "real-window", "procedure": "在已注册 AppX 中逐页检查默认、展开和错误状态"},
     {"claim": "关闭首帧、长回复锚点、悬浮控件、缩放与选择器按时序工作", "kind": "temporal", "procedure": "真实窗口交互或 UIA 记录时间过程"},
     {"claim": "目标本地模型服务接收完整契约并报告真实生命周期", "kind": "runtime", "procedure": "在授权后执行受控服务启动与最小请求；视频布局测试只使用现有媒体"},
-    {"claim": "用户启动的 AppX 与本次构建一致", "kind": "artifact-identity", "procedure": "部署脚本核对构建 DLL、AppX DLL SHA-256 与 AUMID"}
+    {"claim": "用户启动的 AppX 与本次构建一致", "kind": "artifact-identity", "procedure": "部署脚本核对构建 DLL、AppX DLL SHA-256 与 AUMID"},
+    {"claim": "设置页两侧空白、卡片内下拉宽度、保存行是否压住下一张卡，都在当前窗口上核对", "kind": "real-window", "procedure": "当前构建已打开后运行 tests/verify-settings-layout.ps1。tests/verify-winui-ui-baseline.ps1 只跑其中的 -SelfTest，不代替打开窗口"}
   ],
   "baseline_update": {
     "changed": true,

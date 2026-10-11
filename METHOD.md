@@ -5,11 +5,23 @@
 | 项 | 这次 |
 | --- | --- |
 | 库测试 | 设置记录卡走 `QwenLocalChat.Tests`。点空白收回没有库规则。 |
-| 结构标识 | `verify-winui-ui-baseline.ps1` 守 `SettingsScrim`，关闭时不接收点击。 |
+| 结构标识 | `verify-winui-ui-baseline.ps1` 守设置背景铺满窗口、页眉和内容列都是最大宽 1064 且拉满到该宽度（没有 720 居中槽，也不按内容缩成更窄的视频/汉化列），设置行是 `SettingsCard`，下拉不 `Stretch`，「恢复默认值 / 保存 / 放弃确认」在滚动内容里，并且没有 `Scrim`。 |
 | 打开动作 | 当前页可见的设置按钮：`SettingsButton`、`VideoSettingsButton` 或 `HanhuaSettingsButton`。 |
-| 点击目标 | 鼠标点击左侧 `AppIconMark`，让点击落在遮罩上。 |
-| 完成后的属性 | `CloseSettingsButton` 的 `IsEnabled=False`。 |
+| 点击目标 | 鼠标点击左侧 `AppIconMark`。设置铺满窗口后，这一下打在设置页上，不关闭。 |
+| 完成后的属性 | 点击后 `CloseSettingsButton` 仍是 `IsEnabled=True`。再点「关闭」，变为 `IsEnabled=False`。同一窗口还要跑 `verify-settings-layout.ps1`：`StartupPageSetting` 和 `StartupModelSetting` 的宽度在 40–480 DIP，且不超过窗口宽度的 0.55；视频档案下拉和汉化「浏览」与文本列右缘相差不超过 64 物理像素；视频两个 `Expander` 的右缘与「关闭」相差不超过 64 物理像素；键盘焦点落在温度、端口、视频宽度、视频帧率上时，框内只有上下步进按钮；数字框保持 compact 宽度；保存按钮完整落在客户区内且不压住任一 `*Setting`。 |
 
-主窗口标题是 `Local AI`，类名是 `WinUIDesktopWin32WindowClass`。同进程还有一个小状态窗。脚本：`local-chat/tests/verify-settings-scrim.ps1`，应用须已用当前构建打开。
+主窗口标题是 `Local AI`，类名是 `WinUIDesktopWin32WindowClass`。同进程还有一个小状态窗。点空白脚本：`local-chat/tests/verify-settings-scrim.ps1`。窗口三件事脚本：`local-chat/tests/verify-settings-layout.ps1`。应用须已用当前构建打开。源码合约通过不算这三件事通过。`-SelfTest` 用 2026-10-11 那张坏页面的数字做否决，部署时由结构脚本带上；它不代替打开窗口。
+
+同一类布局补丁，两轮都没有让这三项测量变好，就停，把窗口图交回来再选做法。不要再写第三种高度钉死。
 
 2026-09-26：该脚本退出码 0。同一天，用元素消失判断关闭会超时，因为按钮还在树上；用进程名选窗口会打到 135×45 的状态窗。
+
+2026-10-11：设置从右侧 500 抽屉改为整页。点空白不再关闭。原抽屉在 `0a531bd`。
+
+2026-10-11：720 居中槽已否决。窗口上两侧空白是用户指出的问题。可以重开的条件：用户再要一条窄阅读列。保存行钉高度也已否决：钉到窗口根会切掉按钮，写死滚动区高度则卡片不动。保存和恢复默认值改放进滚动内容。
+
+2026-10-11：用户批准按 WinUI Gallery 设置页改。内容列最大宽 1064。窗口更窄时列跟窗口走；超过 1064 后多出来的宽度留在右侧。每一项是 `SettingsCard`：标题和说明在左，操作控件在右，保持自己的宽度。下拉不再横向拉满。成对按钮放在横向 `StackPanel`（间距 8，最小宽 120）。少用的生成项放进 `SettingsExpander`。文本、视频、汉化共用这一列宽。源码合约通过不算窗口测量通过。
+
+2026-10-11：把内容列设成左对齐后，视频和汉化按自己的内容缩窄，右侧空出一大块。列改回 Stretch，并用禁用横向滚动让测量宽度等于窗口。点进数字框时，清空按钮的视觉状态会盖住前面的数字；`LayoutUpdated` 的 sender 恒为 null，不能靠它判断是哪一个框。
+
+2026-10-11：只比视频档案下拉和汉化「浏览」的右缘时，下拉已经对齐，档案参数 `Expander` 仍是 679 像素宽（默认样式 `HorizontalAlignment=Left`）。界面树里的数字全文也不能证明框里看得见。窗口检查改为再量两个视频 `Expander` 的右缘，并用键盘焦点核对温度、端口、宽度、帧率：框内多出上下步进以外的按钮就失败。不要用鼠标点数字框，步进钮会改值。

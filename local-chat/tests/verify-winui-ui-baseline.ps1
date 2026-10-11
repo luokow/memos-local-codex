@@ -45,6 +45,7 @@ function New-XamlNamespaceManager([xml]$document) {
     $manager.AddNamespace('xaml', 'http://schemas.microsoft.com/winfx/2006/xaml/presentation')
     $manager.AddNamespace('x', 'http://schemas.microsoft.com/winfx/2006/xaml')
     $manager.AddNamespace('local', 'using:QwenLocalChat_WinUI')
+    $manager.AddNamespace('toolkit', 'using:CommunityToolkit.WinUI.Controls')
     Write-Output -NoEnumerate $manager
 }
 
@@ -81,7 +82,49 @@ Require-Equal '1.8.260508005' $windowsAppSdk.Version 'WinUI runtime servicing ba
 
 $settingsShell = $settingsPanel.SelectSingleNode('/xaml:UserControl/xaml:Grid/xaml:Border', $settingsNs)
 if ($null -eq $settingsShell) { throw 'Runtime settings panel shell is missing.' }
-Require-equal '500' $settingsShell.Width 'Runtime settings panel must keep the approved compact width.'
+if ($settingsShell.HasAttribute('Width')) {
+    throw 'Settings page must fill the window. A fixed Width is the old drawer.'
+}
+Require-Equal 'Stretch' $settingsShell.HorizontalAlignment 'Settings page must stretch across the window.'
+$settingsColumn = $settingsPanel.SelectSingleNode("//xaml:Grid[@x:Name='SettingsPageColumn']", $settingsNs)
+if ($null -eq $settingsColumn) { throw 'Settings page column is missing.' }
+if ($settingsColumn.HasAttribute('Width') -or $settingsColumn.HorizontalAlignment -eq 'Center') {
+    throw 'Settings column must stretch across the page. A fixed or centered column leaves the side bands the page rejected.'
+}
+Require-Equal 'Stretch' $settingsColumn.HorizontalAlignment 'Settings column must fill the window.'
+Require-Equal 'Stretch' $settingsColumn.VerticalAlignment 'Settings column must fill the window height.'
+if ($settingsColumn.HasAttribute('Grid.Column')) {
+    throw 'Settings column must be the page itself, not a slot inside a spacer host.'
+}
+$settingsHost = $settingsPanel.SelectSingleNode("//xaml:Grid[@x:Name='SettingsPageHost']", $settingsNs)
+if ($null -ne $settingsHost) { throw 'Settings page must not keep a centered width slot.' }
+$fixedSlot = $settingsPanel.SelectSingleNode("//xaml:ColumnDefinition[@Width='720']", $settingsNs)
+if ($null -ne $fixedSlot) { throw 'Settings page must not reserve a 720 center slot.' }
+foreach ($actionId in @('SaveSettingsButton', 'ResetSettingsButton', 'SettingsDiscardConfirmBar')) {
+    $insideScroll = $settingsPanel.SelectSingleNode("//xaml:ScrollViewer[@x:Name='SettingsContentScrollViewer']//*[@AutomationProperties.AutomationId='$actionId']", $settingsNs)
+    if ($null -eq $insideScroll) {
+        throw "Settings action '$actionId' must be inside SettingsContentScrollViewer. Coverage is checked on the open window by verify-settings-layout.ps1."
+    }
+}
+$settingsCardStack = $settingsPanel.SelectSingleNode("//xaml:StackPanel[@x:Name='SettingsCardStack']", $settingsNs)
+if ($null -eq $settingsCardStack) { throw 'Settings scroll content must be the Gallery card stack.' }
+Require-Equal '1064' $settingsCardStack.MaxWidth 'Settings column must use the Gallery max width.'
+Require-Equal 'Stretch' $settingsCardStack.HorizontalAlignment 'Settings column must fill the page up to 1064. Left sizes video and hanhua to their own content and leaves a right gap.'
+$headerStack = $settingsPanel.SelectSingleNode("//xaml:StackPanel[@x:Name='SettingsHeaderStack']", $settingsNs)
+if ($null -eq $headerStack) { throw 'Settings header stack is missing.' }
+Require-Equal '1064' $headerStack.MaxWidth 'Settings header must use the same Gallery max width as the cards.'
+Require-Equal 'Stretch' $headerStack.HorizontalAlignment 'Settings header must match the card column width.'
+$settingsScroll = $settingsPanel.SelectSingleNode("//xaml:ScrollViewer[@x:Name='SettingsContentScrollViewer']", $settingsNs)
+Require-Equal 'Disabled' $settingsScroll.HorizontalScrollMode 'Settings scroll must measure the column with the viewport width.'
+$settingsCards = $settingsPanel.SelectNodes('//toolkit:SettingsCard', $settingsNs)
+if ($settingsCards.Count -lt 8) { throw 'Settings page must use Gallery SettingsCard rows.' }
+foreach ($combo in $settingsPanel.SelectNodes('//xaml:ComboBox', $settingsNs)) {
+    if ($combo.HorizontalAlignment -eq 'Stretch') {
+        throw "Settings ComboBox '$($combo.Name)' must keep its own width. Gallery does not stretch the dropdown."
+    }
+}
+$startupCard = $settingsPanel.SelectSingleNode("//toolkit:SettingsCard[.//xaml:ComboBox[@x:Name='StartupPageBox']]", $settingsNs)
+if ($null -eq $startupCard) { throw 'Startup page combo must sit in a SettingsCard, with the label on the left.' }
 
 $settingsNumbers = $settingsPanel.SelectNodes('//xaml:NumberBox', $settingsNs)
 if ($settingsNumbers.Count -eq 0) { throw 'Runtime settings panel must expose NumberBox controls.' }
@@ -109,11 +152,9 @@ if ($settingsPanelSource -match '(?m)^\s*Visibility\s*=') {
     throw 'Runtime settings panel itself must not detach with Visibility changes.'
 }
 $settingsScrim = $settingsPanel.SelectSingleNode("//xaml:Rectangle[@x:Name='Scrim']", $settingsNs)
-if ($null -eq $settingsScrim) { throw 'Settings scrim is missing.' }
-Require-Equal 'False' $settingsScrim.IsHitTestVisible 'Closed settings scrim must not take hits until the drawer opens.'
-Require-Equal 'SettingsScrim' $settingsScrim.GetAttribute('AutomationProperties.AutomationId') 'Settings scrim must keep a stable automation id.'
-if ($settingsPanelSource -notmatch 'Scrim_Tapped' -or $settingsPanelSource -notmatch 'Scrim\.IsHitTestVisible\s*=\s*true') {
-    throw 'Clicking the open settings scrim must request the same close path as the close button.'
+if ($null -ne $settingsScrim) { throw 'Settings page must not keep a scrim. Blank clicks are not a close path.' }
+if ($settingsPanelSource -match 'Scrim_Tapped' -or $settingsPanelSource -match 'Scrim\.IsHitTestVisible\s*=\s*true') {
+    throw 'Settings page must not close when the blank page is clicked.'
 }
 
 function Require-StringList($value, [string]$message) {
@@ -737,6 +778,10 @@ Require-Equal 'platform-default' $toggleHover.mode 'ToggleSwitch hover contract 
 foreach ($forbiddenKey in @($toggleHover.forbiddenResourceKeys)) {
     Forbid-ResourceKey $appXaml $appNs ([string]$forbiddenKey)
 }
+
+$layoutSelfTest = Join-Path $root 'tests\verify-settings-layout.ps1'
+powershell -NoProfile -ExecutionPolicy Bypass -File $layoutSelfTest -SelfTest
+if ($LASTEXITCODE -ne 0) { throw 'Settings layout self-test failed. The window checks no longer reject the recorded bad page.' }
 
 [pscustomobject]@{
     Result = 'PASS'
